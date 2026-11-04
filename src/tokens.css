@@ -1,0 +1,82 @@
+/* Hallmark · macrostructure: Workbench · tone: utilitarian · anchor hue: gold on jade
+ * pre-emit critique: P4 H4 E4 S5 R4 V4 · slop-test: not run (reference files unavailable)
+ * nav: fixed bottom tab bar · footer: none (app shell) · enrichment: none (typography and data only)
+ * theme: preserved brand (jade board, gold price, Bitter + Be Vietnam Pro)
+ */
+:root {
+  --color-paper: oklch(94.4% 0.009 145.5);
+  --color-surface: oklch(98.7% 0.003 128.5);
+  --color-surface-2: oklch(96.1% 0.006 137.8);
+  --color-ink: oklch(23.3% 0.015 166.2);
+  --color-ink-2: oklch(40.3% 0.020 161.9);
+  --color-muted: oklch(50.7% 0.020 158.6);
+  --color-line: oklch(88.3% 0.013 149.2);
+  --color-grid: oklch(92.9% 0.009 145.5);
+  --color-sjc: oklch(59.8% 0.121 76.4);
+  --color-world: oklch(51.7% 0.105 239.9);
+  --color-up: oklch(53.1% 0.103 170.1);
+  --color-down: oklch(57.0% 0.172 33.4);
+  --color-accent: oklch(47.7% 0.096 78.4);
+  --color-accent-ink: oklch(99.4% 0.009 93.6);
+  --color-up-soft: oklch(93.3% 0.028 162.1);
+  --color-down-soft: oklch(92.3% 0.028 25.9);
+  --color-board: oklch(29.9% 0.046 172.3);
+  --color-board-ink: oklch(95.3% 0.012 157.0);
+  --color-board-muted: oklch(82.6% 0.032 163.1);
+  --color-board-gold: oklch(84.6% 0.125 86.6);
+  --color-board-up: oklch(84.9% 0.121 161.2);
+  --color-board-down: oklch(82.0% 0.101 28.4);
+  --color-board-line: oklch(43.0% 0.057 168.4);
+  --color-backdrop: oklch(15% 0.01 165 / 0.45);
+  --color-shadow: oklch(15% 0.01 165 / 0.18);
+  --font-display: "Bitter", Georgia, "Times New Roman", serif;
+  --font-body: "Be Vietnam Pro", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  --text-xs: 0.8125rem; --text-sm: 0.875rem; --text-md: 1rem; --text-lg: 1.125rem; --text-xl: 1.375rem; --text-2xl: 1.75rem;
+  --space-xs: 4px; --space-sm: 8px; --space-md: 12px; --space-lg: 16px; --space-xl: 24px; --space-2xl: 32px;
+  --radius-sm: 6px; --radius-md: 10px; --radius-lg: 16px; --radius-pill: 999px;
+  --tap: 44px; --nav-h: 58px;
+  --dur-fast: 120ms; --dur-med: 240ms;
+  --ease-out: cubic-bezier(0.2, 0.8, 0.2, 1); --ease-in: cubic-bezier(0.4, 0, 1, 1); --ease-in-out: cubic-bezier(0.4, 0, 0.2, 1);
+}
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) {
+  --color-paper: oklch(18.4% 0.010 172.9);
+  --color-surface: oklch(23.0% 0.014 163.4);
+  --color-surface-2: oklch(27.0% 0.016 168.8);
+  --color-ink: oklch(95.6% 0.007 151.9);
+  --color-ink-2: oklch(84.8% 0.014 159.9);
+  --color-muted: oklch(72.9% 0.018 162.6);
+  --color-line: oklch(32.8% 0.019 163.5);
+  --color-grid: oklch(28.6% 0.017 163.5);
+  --color-sjc: oklch(66.5% 0.125 80.4);
+  --color-world: oklch(63.4% 0.107 235.7);
+  --color-up: oklch(64.9% 0.114 175.9);
+  --color-down: oklch(65.4% 0.158 31.9);
+  --color-accent: oklch(79.9% 0.122 83.2);
+  --color-accent-ink: oklch(20.3% 0.027 87.0);
+  --color-up-soft: oklch(31.1% 0.047 163.7);
+  --color-down-soft: oklch(28.8% 0.052 26.2);
+  --color-board: oklch(32.3% 0.051 171.0);
+  --color-board-line: oklch(45.8% 0.063 169.8);
+  color-scheme: dark;
+} }
+:root[data-theme="dark"] {
+  --color-paper: oklch(18.4% 0.010 172.9);
+  --color-surface: oklch(23.0% 0.014 163.4);
+  --color-surface-2: oklch(27.0% 0.016 168.8);
+  --color-ink: oklch(95.6% 0.007 151.9);
+  --color-ink-2: oklch(84.8% 0.014 159.9);
+  --color-muted: oklch(72.9% 0.018 162.6);
+  --color-line: oklch(32.8% 0.019 163.5);
+  --color-grid: oklch(28.6% 0.017 163.5);
+  --color-sjc: oklch(66.5% 0.125 80.4);
+  --color-world: oklch(63.4% 0.107 235.7);
+  --color-up: oklch(64.9% 0.114 175.9);
+  --color-down: oklch(65.4% 0.158 31.9);
+  --color-accent: oklch(79.9% 0.122 83.2);
+  --color-accent-ink: oklch(20.3% 0.027 87.0);
+  --color-up-soft: oklch(31.1% 0.047 163.7);
+  --color-down-soft: oklch(28.8% 0.052 26.2);
+  --color-board: oklch(32.3% 0.051 171.0);
+  --color-board-line: oklch(45.8% 0.063 169.8);
+  color-scheme: dark;
+}

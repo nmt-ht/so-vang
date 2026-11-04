@@ -2,10 +2,11 @@
   const E = window.GoldEngine;
   const RAW = window.__SNAPSHOT__;
   const STANDALONE = window.__STANDALONE__ === true;
+  const SITE_URL = 'https://nmt-ht.github.io/so-vang/';
   const $ = (id) => document.getElementById(id);
   const view = $('view');
 
-  const VN_TYPES = { SJL1L10: 'SJC 9999 miếng', SJ9999: 'Nhẫn SJC', DOHNL: 'DOJI Hà Nội', PQHN24NTT: 'PNJ 24K', BT9999NTT: 'Bảo Tín 9999' };
+  const VN_TYPES = { SJL1L10: 'SJC miếng', SJ9999: 'Nhẫn SJC', DOHNL: 'DOJI Hà Nội', PQHN24NTT: 'PNJ 24K', BT9999NTT: 'Bảo Tín 9999' };
   const TABS = ['tong-quan', 'ngay', 'dot', 'du-bao'];
   const RANGES = { vn: [['1T', 30], ['3T', 91], ['6T', 182], ['Tất cả', 0]], world: [['1T', 30], ['3T', 91], ['1N', 365], ['5N', 1826], ['10N', 0]] };
   const LIVE_KEY = 'sovang.live.v1';
@@ -24,13 +25,15 @@
     range: { vn: 182, world: 365 },
     waveRange: { vn: 0, world: 1826 },
     th: 5,
-    wave: null,
-    waveLimit: 20,
+    waveLimit: 12,
+    dayLimit: 10,
     day: null,
     horizon: 30,
     rangeFrom: null,
     rangeTo: null,
     scn: null,
+    open: {},
+    scroll: {},
   };
 
   // ---------- Dữ liệu ----------
@@ -83,6 +86,8 @@
   const vnName = () => VN_TYPES[state.type];
   const mktName = (m = state.market) => (m === 'vn' ? vnName() : 'Vàng thế giới');
   const today = () => new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Ho_Chi_Minh' });
+  const tP = (d) => E.toTime(d);
+  const yTick = (m = state.market) => (v) => (m === 'vn' ? num(v / 1e6, 0) : '$' + num(v, 0));
 
   // ---------- Biểu đồ SVG ----------
   function niceTicks(min, max, count) {
@@ -92,7 +97,7 @@
     const step = [1, 2, 2.5, 5, 10].map((m) => m * mag).find((s) => s >= raw) || 10 * mag;
     const out = [];
     for (let v = Math.ceil(min / step) * step; v <= max + 1e-9; v += step) out.push(+v.toFixed(8));
-    return { ticks: out, step };
+    return out;
   }
   function thin(pts, maxN) {
     if (pts.length <= maxN) return pts;
@@ -115,13 +120,20 @@
     return d.slice(0, 4);
   }
 
-  // o: {series:[{label,color,pts:[[t,v]],width,dash,area,noDot}], bands:[{pts:[[t,lo,hi]],color,opacity}], segments:[{pts,color}],
-  //     shade:{from,to}, marker:t, yFmt, tip(t)->{title,rows}, height, ariaLabel, zero}
+  // Chỉ một biểu đồ giữ con trỏ tại một thời điểm; chạm ra ngoài thì trở về giá trị mới nhất.
+  let activeReset = null;
+  document.addEventListener('pointerdown', (e) => {
+    if (activeReset && !e.target.closest('.chart svg')) { activeReset(); activeReset = null; }
+  });
+
+  // o: {series:[{color,pts:[[t,v]],width,dash,area,noDot}], axis:[[t,v]], restIndex, restPrefix, bands, segments, shade, marker, markers,
+  //     yFmt, tip(i)->{title,rows:[[nhãn,giá trị,màu]],dots}, height, ariaLabel, zero}
   function drawChart(host, o) {
-    const W = Math.max(260, host.clientWidth || 340), H = o.height || 230;
-    const m = { l: 6, r: 48, t: 10, b: 22 };
+    host.innerHTML = '';
+    const W = Math.max(240, host.clientWidth || 320), H = o.height || 210;
+    const m = { l: 4, r: 46, t: 8, b: 22 };
     const pw = W - m.l - m.r, ph = H - m.t - m.b;
-    const all = [...o.series.flatMap((s) => s.pts)];
+    const all = o.series.flatMap((s) => s.pts);
     const times = all.map((p) => p[0]);
     let vals = all.map((p) => p[1]);
     (o.bands || []).forEach((b) => b.pts.forEach((p) => { times.push(p[0]); vals.push(p[1], p[2]); }));
@@ -131,20 +143,21 @@
     let y0 = Math.min(...vals), y1 = Math.max(...vals);
     const pad = (y1 - y0 || Math.abs(y1) * 0.02 || 1) * 0.08;
     y0 -= pad; y1 += pad;
-    const { ticks } = niceTicks(y0, y1, 4);
     const X = (t) => m.l + ((t - t0) / (t1 - t0 || 1)) * pw;
     const Y = (v) => m.t + (1 - (v - y0) / (y1 - y0)) * ph;
     const P = (x) => x.toFixed(1);
     const line = (pts) => pts.map((p, i) => (i ? 'L' : 'M') + P(X(p[0])) + ' ' + P(Y(p[1]))).join('');
+    const surface = css('--color-surface');
+    const dot = (x, y, color, r = 4.5) => `<circle cx="${P(x)}" cy="${P(y)}" r="${r}" fill="${color}" stroke="${surface}" stroke-width="2"/>`;
 
     let g = '';
-    ticks.forEach((v) => {
-      g += `<line x1="${m.l}" x2="${W - m.r}" y1="${P(Y(v))}" y2="${P(Y(v))}" stroke="var(--grid)"/>`;
+    niceTicks(y0, y1, 4).forEach((v) => {
+      g += `<line x1="${m.l}" x2="${W - m.r}" y1="${P(Y(v))}" y2="${P(Y(v))}" stroke="var(--color-grid)"/>`;
       g += `<text x="${W - m.r + 6}" y="${P(Y(v) + 4)}">${esc(o.yFmt(v))}</text>`;
     });
-    if (o.zero) g += `<line x1="${m.l}" x2="${W - m.r}" y1="${P(Y(0))}" y2="${P(Y(0))}" stroke="var(--muted)"/>`;
+    if (o.zero) g += `<line x1="${m.l}" x2="${W - m.r}" y1="${P(Y(0))}" y2="${P(Y(0))}" stroke="var(--color-muted)"/>`;
     const spanDays = (t1 - t0) / 864e5;
-    const nx = W < 380 ? 3 : 4;
+    const nx = W < 340 ? 2 : 3;
     for (let i = 0; i <= nx; i++) {
       const t = t0 + ((t1 - t0) * i) / nx;
       const anchor = i === 0 ? 'start' : i === nx ? 'end' : 'middle';
@@ -152,7 +165,7 @@
     }
     if (o.shade) {
       const a = Math.max(o.shade.from, t0), b = Math.min(o.shade.to, t1);
-      g += `<rect x="${P(X(a))}" y="${m.t}" width="${P(Math.max(1, X(b) - X(a)))}" height="${ph}" fill="var(--accent)" opacity="0.12"/>`;
+      g += `<rect x="${P(X(a))}" y="${m.t}" width="${P(Math.max(1, X(b) - X(a)))}" height="${ph}" fill="var(--color-accent)" opacity="0.12"/>`;
     }
     (o.bands || []).forEach((b) => {
       const up = b.pts.map((p) => P(X(p[0])) + ' ' + P(Y(p[2])));
@@ -162,66 +175,71 @@
     const maxN = Math.round(pw * 1.2);
     o.series.forEach((s) => {
       const pts = thin(s.pts, maxN);
-      if (s.area && pts.length) {
-        g += `<path d="${line(pts)}L${P(X(pts[pts.length - 1][0]))} ${m.t + ph}L${P(X(pts[0][0]))} ${m.t + ph}Z" fill="${s.color}" opacity="0.1"/>`;
-      }
-      if (!s.hideLine) g += `<path d="${line(pts)}" fill="none" stroke="${s.color}" stroke-width="${s.width || 2}" stroke-linejoin="round" stroke-linecap="round"${s.dash ? ` stroke-dasharray="${s.dash}"` : ''}/>`;
+      if (s.area && pts.length) g += `<path d="${line(pts)}L${P(X(pts[pts.length - 1][0]))} ${m.t + ph}L${P(X(pts[0][0]))} ${m.t + ph}Z" fill="${s.color}" opacity="0.1"/>`;
+      g += `<path d="${line(pts)}" fill="none" stroke="${s.color}" stroke-width="${s.width || 2}" stroke-linejoin="round" stroke-linecap="round"${s.dash ? ` stroke-dasharray="${s.dash}"` : ''}/>`;
     });
-    (o.segments || []).forEach((s) => {
-      g += `<path d="${line(thin(s.pts, maxN))}" fill="none" stroke="${s.color}" stroke-width="${s.width || 2}" stroke-linejoin="round" stroke-linecap="round"/>`;
-    });
-    if (o.marker != null && o.marker >= t0 && o.marker <= t1) g += `<line x1="${P(X(o.marker))}" x2="${P(X(o.marker))}" y1="${m.t}" y2="${m.t + ph}" stroke="var(--accent)" stroke-width="1.5"/>`;
+    (o.segments || []).forEach((s) => { g += `<path d="${line(thin(s.pts, maxN))}" fill="none" stroke="${s.color}" stroke-width="${s.width || 2}" stroke-linejoin="round" stroke-linecap="round"/>`; });
+    if (o.marker != null && o.marker >= t0 && o.marker <= t1) g += `<line x1="${P(X(o.marker))}" x2="${P(X(o.marker))}" y1="${m.t}" y2="${m.t + ph}" stroke="var(--color-accent)" stroke-width="1.5"/>`;
     o.series.forEach((s) => {
       if (s.noDot || !s.pts.length) return;
       const e = s.pts[s.pts.length - 1];
-      g += `<circle cx="${P(X(e[0]))}" cy="${P(Y(e[1]))}" r="4.5" fill="${s.color}" stroke="var(--surface)" stroke-width="2"/>`;
+      g += dot(X(e[0]), Y(e[1]), s.color);
     });
-    (o.markers || []).forEach((mk) => {
-      if (mk.t < t0 || mk.t > t1) return;
-      g += `<circle cx="${P(X(mk.t))}" cy="${P(Y(mk.v))}" r="4.5" fill="${mk.color}" stroke="var(--surface)" stroke-width="2"/>`;
-    });
+    (o.markers || []).forEach((mk) => { if (mk.t >= t0 && mk.t <= t1) g += dot(X(mk.t), Y(mk.v), mk.color); });
 
-    const axis = o.series[0].pts;
-    host.innerHTML = `<svg viewBox="0 0 ${W} ${H}" height="${H}" role="img" tabindex="0" aria-label="${esc(o.ariaLabel || '')}">${g}<g class="cross"></g></svg><div class="tip" hidden></div>`;
-    const svg = host.firstChild, tip = host.lastChild, cross = svg.querySelector('.cross');
-    let cursor = -1;
-    function show(i) {
-      if (!o.tip || !axis.length) return;
-      cursor = Math.max(0, Math.min(axis.length - 1, i));
-      const p = axis[cursor], x = X(p[0]);
-      const info = o.tip(p[0], cursor);
-      let dots = '';
-      (info.dots || []).forEach((d) => { dots += `<circle cx="${P(x)}" cy="${P(Y(d.v))}" r="4.5" fill="${d.color}" stroke="var(--surface)" stroke-width="2"/>`; });
-      cross.innerHTML = `<line x1="${P(x)}" x2="${P(x)}" y1="${m.t}" y2="${m.t + ph}" stroke="var(--muted)" stroke-dasharray="3 3"/>${dots}`;
-      tip.innerHTML = `<b>${esc(info.title)}</b>` + info.rows.map((r) => `<div><span>${esc(r[0])}</span><span>${esc(r[1])}</span></div>`).join('');
-      tip.hidden = false;
-      const tw = tip.offsetWidth;
-      tip.style.left = Math.max(0, Math.min(W - tw, x < W / 2 ? x + 10 : x - tw - 10)) * (host.clientWidth / W) + 'px';
+    const axis = o.axis || o.series[0].pts;
+    const rest = o.restIndex != null ? o.restIndex : axis.length - 1;
+    const prefix = o.restPrefix != null ? o.restPrefix : 'Mới nhất · ';
+
+    const readout = document.createElement('div');
+    readout.className = 'readout';
+    host.appendChild(readout);
+    const wrap = document.createElement('div');
+    wrap.innerHTML = `<svg viewBox="0 0 ${W} ${H}" height="${H}" role="img" tabindex="0" aria-label="${esc(o.ariaLabel || '')}">${g}<g class="cross"></g></svg>`;
+    const svg = wrap.firstChild;
+    host.appendChild(svg);
+    const cross = svg.querySelector('.cross');
+
+    function write(i, atRest) {
+      const info = o.tip(i);
+      readout.innerHTML = `<div class="readout-title">${atRest ? prefix : ''}${esc(info.title)}</div><div class="readout-rows">${info.rows.map((r) => `<span>${r[2] ? `<i style="background:${r[2]}"></i>` : ''}${esc(r[0])}<b>${esc(r[1])}</b></span>`).join('')}</div>`;
     }
+    let cursor = -1, down = false;
+    function show(i) {
+      cursor = Math.max(0, Math.min(axis.length - 1, i));
+      const x = X(axis[cursor][0]);
+      const info = o.tip(cursor);
+      cross.innerHTML = `<line x1="${P(x)}" x2="${P(x)}" y1="${m.t}" y2="${m.t + ph}" stroke="var(--color-muted)" stroke-dasharray="3 3"/>${(info.dots || []).map((d) => dot(x, Y(d.v), d.color)).join('')}`;
+      write(cursor, false);
+    }
+    function reset() { cross.innerHTML = ''; cursor = -1; write(rest, true); }
     function nearest(clientX) {
       const r = svg.getBoundingClientRect();
-      const x = ((clientX - r.left) / r.width) * W;
-      const t = t0 + ((x - m.l) / pw) * (t1 - t0);
+      const t = t0 + ((((clientX - r.left) / r.width) * W - m.l) / pw) * (t1 - t0);
       let lo = 0, hi = axis.length - 1;
       while (lo < hi) { const c = (lo + hi) >> 1; if (axis[c][0] < t) lo = c + 1; else hi = c; }
       if (lo > 0 && t - axis[lo - 1][0] < axis[lo][0] - t) lo--;
       return lo;
     }
-    const hide = () => { cross.innerHTML = ''; tip.hidden = true; cursor = -1; };
-    svg.addEventListener('pointerdown', (e) => show(nearest(e.clientX)));
-    svg.addEventListener('pointermove', (e) => { if (e.pointerType === 'mouse' || e.buttons || e.pressure > 0) show(nearest(e.clientX)); });
-    svg.addEventListener('pointerleave', (e) => { if (e.pointerType === 'mouse') hide(); });
-    svg.addEventListener('blur', hide);
+    reset();
+    svg.addEventListener('pointerdown', (e) => {
+      if (activeReset && activeReset !== reset) activeReset();
+      activeReset = reset; down = true;
+      show(nearest(e.clientX));
+    });
+    svg.addEventListener('pointermove', (e) => { if (down || e.pointerType === 'mouse') { activeReset = reset; show(nearest(e.clientX)); } });
+    ['pointerup', 'pointercancel'].forEach((n) => svg.addEventListener(n, () => { down = false; }));
+    svg.addEventListener('pointerleave', (e) => { down = false; if (e.pointerType === 'mouse') reset(); });
+    svg.addEventListener('blur', () => { if (cursor >= 0 && !down) reset(); });
     svg.addEventListener('keydown', (e) => {
       if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') {
         e.preventDefault();
-        show((cursor < 0 ? axis.length - 1 : cursor) + (e.key === 'ArrowRight' ? 1 : -1));
-      } else if (e.key === 'Escape') hide();
+        show((cursor < 0 ? rest : cursor) + (e.key === 'ArrowRight' ? 1 : -1));
+      } else if (e.key === 'Escape') reset();
     });
   }
 
   const legend = (items) => `<div class="legend">${items.map((i) => `<span><i class="${i.dash ? 'dash' : ''}${i.swatch ? ' swatch' : ''}" style="background:${i.color};color:${i.color};${i.opacity ? `opacity:${i.opacity}` : ''}"></i>${esc(i.label)}</span>`).join('')}</div>`;
-  const tP = (d) => E.toTime(d);
 
   function windowed(rows, days) {
     if (!days) return rows;
@@ -230,6 +248,32 @@
   }
   const rangeChips = (active, prefix) => `<div class="chips" role="group" aria-label="Khoảng thời gian">${RANGES[state.market].map(([lab, n]) => `<button id="${prefix}-${n}" class="chip" type="button" data-act="${prefix}:${n}" aria-pressed="${active === n}">${lab}</button>`).join('')}</div>`;
 
+  // Mục mở rộng: nhớ trạng thái đóng mở và chỉ vẽ biểu đồ bên trong khi đã mở.
+  const fold = (id, title, hint, inner) => `<details class="block" id="${id}"${state.open[id] ? ' open' : ''}><summary>${esc(title)}${hint ? `<span class="hint">${esc(hint)}</span>` : ''}</summary><div class="stack">${inner}</div></details>`;
+  function wireFold(id, onOpen) {
+    const el = $(id);
+    if (!el) return;
+    let drawn = false;
+    const draw = () => { if (onOpen && !drawn && el.isConnected) { drawn = true; onOpen(); } };
+    if (el.open) draw();
+    // Sự kiện toggle đến sau: phần tử có thể đã bị thay vì người dùng vừa đổi màn hình.
+    el.addEventListener('toggle', () => { if (!el.isConnected) return; state.open[id] = el.open; if (el.open) draw(); });
+  }
+
+  function meter(o) {
+    const span = o.high - o.low || 1;
+    const at = (v) => Math.max(0, Math.min(100, ((v - o.low) / span) * 100)).toFixed(1);
+    return `<div class="meter">
+      <div class="meter-head"><span>${esc(o.label)}</span><b>${esc(o.value)}</b></div>
+      <div class="meter-track" role="img" aria-label="${esc(`${o.label}: ${o.value}, thấp nhất ${o.lowText}, cao nhất ${o.highText}`)}">
+        ${o.mark != null ? `<span class="meter-mark" style="left:${at(o.mark)}%"></span>` : ''}
+        <span class="meter-dot" style="left:${at(o.now)}%"></span>
+      </div>
+      <div class="meter-ends"><span>${esc(o.lowText)}</span><span>${esc(o.highText)}</span></div>
+      ${o.note ? `<p class="note">${esc(o.note)}</p>` : ''}
+    </div>`;
+  }
+
   // ---------- Tổng quan ----------
   function renderOverview() {
     const m = state.market;
@@ -237,7 +281,9 @@
     const last = rows[rows.length - 1], prev = rows[rows.length - 2];
     const prem = premium(), lp = prem[prem.length - 1];
     const ch = last.v - prev.v, chp = (last.v / prev.v - 1) * 100;
-    const conv = ds.world[ds.world.length - 1].p * ds.fx[ds.fx.length - 1].v * E.OZ_PER_LUONG;
+    const fxNow = ds.fx[ds.fx.length - 1].v;
+    const conv = ds.world[ds.world.length - 1].p * fxNow * E.OZ_PER_LUONG;
+
     const board = m === 'vn' ? `
       <div class="board-label">${esc(vnName())} · giá bán ra · ${fmtDate(last.d)}</div>
       <div class="price">${tr(last.v)}<small>triệu đồng/lượng</small></div>
@@ -245,78 +291,75 @@
       <dl class="board-grid">
         <div><dt>Mua vào</dt><dd>${tr(last.buy)} <span>triệu</span></dd></div>
         <div><dt>Chênh mua, bán</dt><dd>${tr(last.sell - last.buy)} <span>triệu</span></dd></div>
-        <div><dt>Thế giới quy đổi</dt><dd>${tr(lp.conv)} <span>triệu</span></dd></div>
-        <div><dt>Cao hơn thế giới</dt><dd>${pct(lp.pct)} <span>${tr(lp.gap)} tr</span></dd></div>
       </dl>` : `
       <div class="board-label">Vàng thế giới XAU/USD · ${fmtDate(last.d)}</div>
       <div class="price">${usd(last.v)}<small>/oz</small></div>
       <div class="delta ${dirClass(ch)}">${arrow(ch)} ${signed(usd(Math.abs(ch)), ch)} (${pct(chp)}) so với phiên trước</div>
       <dl class="board-grid">
         <div><dt>Quy đổi ra VND</dt><dd>${tr(conv)} <span>triệu/lượng</span></dd></div>
-        <div><dt>USD/VND</dt><dd>${num(ds.fx[ds.fx.length - 1].v, 0)}</dd></div>
+        <div><dt>USD/VND</dt><dd>${num(fxNow, 0)}</dd></div>
       </dl>`;
 
-    const staleNote = STANDALONE ? '' : `<p class="stale">Bản này hiển thị dữ liệu đã chốt đến ${fmtDate(ds.sourceDates.vn)}. Giá chỉ tự cập nhật ở bản cài lên iPhone.</p>`;
+    const y = windowed(rows, 365).map((r) => r.v);
+    const yHigh = Math.max(...y), yLow = Math.min(...y);
+    const pv = prem.map((p) => p.pct), pMean = E.mean(pv), pMin = Math.min(...pv), pMax = Math.max(...pv);
+    const pDiff = lp.pct - pMean;
+    const pNote = Math.abs(pDiff) < 0.5 ? 'Gần mức trung bình.' : `${pDiff > 0 ? 'Cao hơn' : 'Thấp hơn'} mức trung bình ${num(Math.abs(pDiff), 1)} điểm phần trăm (vạch dọc).`;
+    const waves = E.detectWaves(rows.map((r) => ({ d: r.d, p: r.v })), 5);
+    const cw = waves[waves.length - 1];
 
     view.innerHTML = `
       <section class="board">${board}</section>
-      ${staleNote}
       <section class="block">
-        <h2>${m === 'vn' ? `${esc(vnName())} so với giá thế giới` : 'Diễn biến giá thế giới'}</h2>
+        <h2>Giá đang ở đâu</h2>
+        ${meter({ label: `Trong ${m === 'vn' && rows.length < 365 ? rows.length + ' ngày qua' : '12 tháng qua'}`, value: valFmt(last.v) + (m === 'vn' ? ' triệu' : ''), now: last.v, low: yLow, high: yHigh, lowText: `Thấp nhất ${valFmt(yLow)}`, highText: `Cao nhất ${valFmt(yHigh)}`, note: `Cách đỉnh ${pct((last.v / yHigh - 1) * 100)}, cao hơn đáy ${pct((last.v / yLow - 1) * 100)}.` })}
+        ${meter({ label: `${vnName()} cao hơn thế giới`, value: pct(lp.pct) + ` (${tr(lp.gap)} triệu)`, now: lp.pct, mark: pMean, low: pMin, high: pMax, lowText: `Thấp nhất ${pct(pMin)}`, highText: `Cao nhất ${pct(pMax)}`, note: pNote })}
+        ${cw ? `<div class="fact"><span>Đợt hiện tại</span><b class="pill ${dirClass(cw.dir)}">${arrow(cw.dir)} ${cw.dir > 0 ? 'Tăng' : 'Giảm'} ${pct(cw.pct)}</b><p class="note">Bắt đầu ${fmtDate(cw.from)}, được ${cw.days} ngày.</p></div>` : ''}
+      </section>
+      <section class="block">
+        <h2>${m === 'vn' ? 'So với giá thế giới' : 'Diễn biến giá'}</h2>
         ${rangeChips(state.range[m], 'range')}
         <div class="chart" id="ch-main"></div>
         <div id="lg-main"></div>
-        ${m === 'vn' ? '<p class="note">Giá thế giới quy đổi theo tỷ giá USD/VND, 1 lượng = 37,5 g ≈ 1,2057 oz. Dữ liệu vàng Việt Nam có từ 23/11/2025.</p>' : ''}
+        ${m === 'vn' ? '<p class="note">Đơn vị triệu đồng/lượng. Giá thế giới quy đổi theo tỷ giá USD/VND, 1 lượng ≈ 1,2057 oz.</p>' : '<p class="note">Đơn vị USD/oz.</p>'}
       </section>
-      <section class="block">
-        <h2>Vàng trong nước cao hơn thế giới bao nhiêu</h2>
-        <p class="lede">${esc(vnName())} đang cao hơn giá quy đổi <b>${pct(lp.pct)}</b>. Trong ${prem.length} ngày qua, mức này dao động từ ${pct(Math.min(...prem.map((p) => p.pct)))} đến ${pct(Math.max(...prem.map((p) => p.pct)))}, trung bình ${pct(E.mean(prem.map((p) => p.pct)))}.</p>
-        <div class="chart" id="ch-prem"></div>
-      </section>
-      <section class="block">
-        <h2>Chỉ số phân tích</h2>
-        ${analysisHtml()}
-      </section>
-      ${sourcesHtml()}`;
+      ${fold('d-prem', 'Lịch sử chênh lệch', '', `<div class="chart" id="ch-prem"></div><p class="note">Phần trăm ${esc(vnName())} cao hơn giá thế giới quy đổi, ${prem.length} ngày qua.</p>`)}
+      ${fold('d-tech', 'Chỉ số kỹ thuật', `RSI ${num(E.rsi(rows.map((r) => r.v))[rows.length - 1], 0)}`, analysisHtml())}
+      ${fold('d-src', 'Nguồn dữ liệu', '', sourcesHtml())}`;
 
     const vis = windowed(rows, state.range[m]);
     if (m === 'vn') {
-      const pv = windowed(prem, state.range[m]);
-      const sjc = css('--sjc'), wc = css('--world');
+      const pw = windowed(prem, state.range[m]);
+      const sjc = css('--color-sjc'), wc = css('--color-world');
       drawChart($('ch-main'), {
-        ariaLabel: `Biểu đồ ${vnName()} và thế giới quy đổi, triệu đồng mỗi lượng`,
-        yFmt: (v) => num(v / 1e6, 0),
-        series: [
-          { label: vnName(), color: sjc, pts: pv.map((r) => [tP(r.d), r.sell]) },
-          { label: 'Thế giới quy đổi', color: wc, pts: pv.map((r) => [tP(r.d), r.conv]) },
-        ],
-        tip: (t, i) => ({ title: fmtDate(pv[i].d), rows: [['Bán ra', tr(pv[i].sell) + ' tr'], ['Thế giới', tr(pv[i].conv) + ' tr'], ['Cao hơn', pct(pv[i].pct)]], dots: [{ v: pv[i].sell, color: sjc }, { v: pv[i].conv, color: wc }] }),
+        ariaLabel: `Biểu đồ ${vnName()} và thế giới quy đổi, triệu đồng mỗi lượng. Mới nhất ${tr(last.v)} triệu.`,
+        yFmt: yTick('vn'),
+        series: [{ color: sjc, pts: pw.map((r) => [tP(r.d), r.sell]) }, { color: wc, pts: pw.map((r) => [tP(r.d), r.conv]) }],
+        tip: (i) => ({ title: fmtDate(pw[i].d), rows: [['Bán ra', tr(pw[i].sell), sjc], ['Thế giới', tr(pw[i].conv), wc], ['Cao hơn', pct(pw[i].pct)]], dots: [{ v: pw[i].sell, color: sjc }, { v: pw[i].conv, color: wc }] }),
       });
       $('lg-main').innerHTML = legend([{ label: vnName() + ' bán ra', color: sjc }, { label: 'Thế giới quy đổi', color: wc }]);
     } else {
-      const wc = css('--world');
-      const allV = rows.map((r) => r.v);
-      const ma50 = E.sma(allV, 50);
+      const wc = css('--color-world'), mc = css('--color-muted');
+      const ma50 = E.sma(rows.map((r) => r.v), 50);
       const offset = rows.length - vis.length;
-      const maPts = vis.map((r, i) => [tP(r.d), ma50[offset + i]]).filter((p) => p[1] != null);
       drawChart($('ch-main'), {
-        ariaLabel: 'Biểu đồ giá vàng thế giới, USD mỗi ounce',
-        yFmt: (v) => '$' + num(v, 0),
-        series: [
-          { label: 'XAU/USD', color: wc, pts: vis.map((r) => [tP(r.d), r.v]), area: true },
-          { label: 'MA50', color: css('--muted'), pts: maPts, width: 1.5, dash: '4 3', noDot: true },
-        ],
-        tip: (t, i) => ({ title: fmtDate(vis[i].d), rows: [['Giá', usd(vis[i].v)]].concat(ma50[offset + i] != null ? [['MA50', usd(ma50[offset + i])]] : []), dots: [{ v: vis[i].v, color: wc }] }),
+        ariaLabel: `Biểu đồ giá vàng thế giới, USD mỗi ounce. Mới nhất ${usd(last.v)}.`,
+        yFmt: yTick('world'),
+        series: [{ color: wc, pts: vis.map((r) => [tP(r.d), r.v]), area: true }, { color: mc, pts: vis.map((r, i) => [tP(r.d), ma50[offset + i]]).filter((p) => p[1] != null), width: 1.5, dash: '4 3', noDot: true }],
+        tip: (i) => ({ title: fmtDate(vis[i].d), rows: [['Giá', usd(vis[i].v), wc]].concat(ma50[offset + i] != null ? [['MA50', usd(ma50[offset + i])]] : []), dots: [{ v: vis[i].v, color: wc }] }),
       });
-      $('lg-main').innerHTML = legend([{ label: 'XAU/USD', color: wc }, { label: 'Trung bình 50 phiên (MA50)', color: css('--muted'), dash: true }]);
+      $('lg-main').innerHTML = legend([{ label: 'XAU/USD', color: wc }, { label: 'Trung bình 50 phiên (MA50)', color: mc, dash: true }]);
     }
-    drawChart($('ch-prem'), {
-      height: 160,
-      ariaLabel: 'Biểu đồ phần trăm chênh lệch giữa giá trong nước và thế giới',
-      yFmt: (v) => num(v, 0) + '%',
-      series: [{ label: 'Chênh lệch', color: css('--sjc'), pts: prem.map((r) => [tP(r.d), r.pct]), area: true }],
-      tip: (t, i) => ({ title: fmtDate(prem[i].d), rows: [['Cao hơn', pct(prem[i].pct)], ['Tương đương', tr(prem[i].gap) + ' tr/lượng']], dots: [{ v: prem[i].pct, color: css('--sjc') }] }),
+    wireFold('d-prem', () => {
+      const c = css('--color-sjc');
+      drawChart($('ch-prem'), {
+        height: 160, ariaLabel: 'Biểu đồ phần trăm chênh lệch giữa giá trong nước và thế giới', yFmt: (v) => num(v, 0) + '%',
+        series: [{ color: c, pts: prem.map((r) => [tP(r.d), r.pct]), area: true }],
+        tip: (i) => ({ title: fmtDate(prem[i].d), rows: [['Cao hơn', pct(prem[i].pct)], ['Tương đương', tr(prem[i].gap) + ' triệu']], dots: [{ v: prem[i].pct, color: c }] }),
+      });
     });
+    wireFold('d-tech');
+    wireFold('d-src');
   }
 
   function analysisHtml() {
@@ -327,31 +370,23 @@
     const ma20 = E.sma(v, 20)[n - 1], ma50 = E.sma(v, 50)[n - 1], rsi = E.rsi(v)[n - 1];
     const vol = E.annualVol(v, 21, perYear);
     const peak = Math.max(...v), peakD = rows[v.lastIndexOf(peak)].d;
-    const y = windowed(rows, 365).map((r) => r.v);
-    const waves = E.detectWaves(rows.map((r) => ({ d: r.d, p: r.v })), 5);
-    const cw = waves[waves.length - 1];
-    const rsiText = rsi >= 70 ? 'Vùng quá mua, giá đã tăng nhanh trong ngắn hạn' : rsi <= 30 ? 'Vùng quá bán, giá đã giảm nhanh trong ngắn hạn' : 'Vùng trung tính';
-    const posText = (a, name) => `${last >= a ? 'trên' : 'dưới'} ${name}`;
+    const rsiText = rsi >= 70 ? 'Vùng quá mua: giá đã tăng nhanh trong ngắn hạn' : rsi <= 30 ? 'Vùng quá bán: giá đã giảm nhanh trong ngắn hạn' : 'Vùng trung tính';
+    const posText = (a) => `Giá hiện ${last >= a ? 'trên' : 'dưới'} đường này, lệch ${pct((last / a - 1) * 100)}`;
     const row = (k, val, sub) => `<div><dt>${esc(k)}</dt><dd>${val}</dd>${sub ? `<span class="sub">${esc(sub)}</span>` : ''}</div>`;
     return `<dl class="rows">
-      ${row(`Trung bình 20 ${sessions}`, valFmt(ma20), `Giá hiện ${posText(ma20, 'đường này')}, lệch ${pct((last / ma20 - 1) * 100)}`)}
-      ${row(`Trung bình 50 ${sessions}`, valFmt(ma50), `Giá hiện ${posText(ma50, 'đường này')}, lệch ${pct((last / ma50 - 1) * 100)}`)}
+      ${row(`Trung bình 20 ${sessions}`, valFmt(ma20), posText(ma20))}
+      ${row(`Trung bình 50 ${sessions}`, valFmt(ma50), posText(ma50))}
       ${row('RSI 14', num(rsi, 0), rsiText)}
       ${row(`Biến động 21 ${sessions}`, num(vol, 1) + '%/năm', 'Càng cao thì giá dao động càng mạnh')}
       ${row(m === 'vn' ? 'Đỉnh trong dữ liệu' : 'Đỉnh 10 năm', valFmt(peak), `Đạt ngày ${fmtDate(peakD)}, giá hiện cách đỉnh ${pct((last / peak - 1) * 100)}`)}
-      ${row('Cao, thấp 12 tháng', `${valFmt(Math.max(...y))} · ${valFmt(Math.min(...y))}`, '')}
-      ${cw ? row('Đợt hiện tại', `<span class="pill ${dirClass(cw.dir)}">${arrow(cw.dir)} ${pct(cw.pct)}</span>`, `Từ ${fmtDate(cw.from)}, được ${cw.days} ngày, tính theo ngưỡng đảo chiều 5%`) : ''}
     </dl>`;
   }
 
   function sourcesHtml() {
-    return `<section class="block fine">
-      <details>
-        <summary>Nguồn dữ liệu và cách tính</summary>
-        <p>Giá vàng Việt Nam và giá giao ngay XAU/USD từ 23/11/2025: <a href="https://www.vang.today/en/api" target="_blank" rel="noopener">vang.today</a>. Giá thế giới trước đó: hợp đồng tương lai vàng GC=F trên Yahoo Finance, lệch khoảng ${num(RAW.futuresVsSpotPct || 0.4, 1)}% so với giá giao ngay ở phần trùng nhau. Tỷ giá USD/VND: Yahoo Finance, làm mượt bằng trung vị 5 phiên; bản cài lên iPhone lấy thêm từ open.er-api.com.</p>
-        <p>Giá thế giới không tính thứ bảy, chủ nhật vì thị trường nghỉ. Giá Việt Nam giữ nguyên mọi ngày trong tuần như nguồn công bố. Mỗi ngày lấy mức giá cuối cùng mà nguồn ghi nhận, nên giá trong ngày có thể khác giá bạn thấy ở tiệm.</p>
-      </details>
-    </section>`;
+    return `<div class="fine stack">
+      <p>Giá vàng Việt Nam và giá giao ngay XAU/USD từ 23/11/2025 lấy từ <a href="https://www.vang.today/en/api" target="_blank" rel="noopener">vang.today</a>. Giá thế giới trước đó là hợp đồng tương lai GC=F trên Yahoo Finance, lệch khoảng ${num(RAW.futuresVsSpotPct || 0.4, 1)}% so với giá giao ngay. Tỷ giá lấy từ Yahoo Finance và open.er-api.com.</p>
+      <p>Mỗi ngày lấy mức giá cuối cùng mà nguồn ghi nhận, nên có thể khác giá ở tiệm. Giá thế giới không có thứ bảy, chủ nhật vì thị trường nghỉ.</p>
+    </div>`;
   }
 
   // ---------- Theo ngày ----------
@@ -367,18 +402,21 @@
           <input id="day-input" type="date" aria-label="Chọn ngày" min="${first}" max="${lastD}" value="${state.day}">
           <button id="day-next" type="button" data-act="daystep:1" aria-label="Ngày sau">›</button>
         </div>
-        <p class="note">${state.market === 'vn' ? `Có dữ liệu từ ${fmtDate(first)} đến ${fmtDate(lastD)}. Muốn xem xa hơn, chuyển sang Thế giới (từ ${fmtDate(ds.world[0].d)}).` : `Có dữ liệu từ ${fmtDate(first)} đến ${fmtDate(lastD)}.`}</p>
+        <p class="note">Có dữ liệu từ ${fmtDate(first)}.${state.market === 'vn' ? ` Xem xa hơn ở Thế giới, từ ${fmtDate(ds.world[0].d)}.` : ''}</p>
+        <button id="day-latest" class="text-btn more-btn" type="button" data-act="day:${lastD}">Về ngày mới nhất</button>
       </section>
-      <div id="day-body" style="display:grid;gap:14px"></div>
+      <div id="day-body" class="stack"></div>
       <section class="block">
-        <h2>30 ngày gần nhất</h2>
+        <h2>Các ngày gần đây</h2>
         <div id="day-list"></div>
+        <button id="day-more" class="text-btn more-btn" type="button" data-act="daymore:1">Xem thêm</button>
       </section>`;
-    renderDayBody();
+    syncDay();
+    renderDayList();
   }
 
-  function renderDayBody() {
-    const m = state.market, rows = series(), d = state.day;
+  function dayDetailHtml(d, chartId) {
+    const m = state.market, rows = series();
     let idx = rows.findIndex((r) => r.d === d);
     let note = '';
     if (idx < 0) {
@@ -389,7 +427,6 @@
     const ch = pr ? r.v - pr.v : 0, chp = pr ? (r.v / pr.v - 1) * 100 : 0;
     const wAt = E.asOfLookup(ds.world, 'p')(d), fxAt = E.asOfLookup(ds.fx, 'v')(d);
     const inVn = d >= ds.vn.SJL1L10[0].d;
-
     const vnRows = Object.keys(VN_TYPES).map((t) => {
       const list = ds.vn[t], i = list.findIndex((x) => x.d === d);
       if (i < 0) return '';
@@ -398,7 +435,9 @@
     }).join('');
     const p = inVn ? premium().find((x) => x.d === d) : null;
 
-    $('day-body').innerHTML = `
+    return {
+      idx,
+      html: `
       <section class="board">
         <div class="board-label">${esc(mktName())} · ${weekday(d)}, ${fmtDate(d)}</div>
         <div class="price">${m === 'vn' ? tr(r.v) : usd(r.v)}<small>${m === 'vn' ? 'triệu đồng/lượng' : '/oz'}</small></div>
@@ -413,33 +452,64 @@
       </section>
       <section class="block">
         <h2>Diễn biến quanh ngày này</h2>
-        <div class="chart" id="ch-day"></div>
-        <p class="note">Vạch dọc đánh dấu ngày đang xem. Giá ${unit()}.</p>
+        <div class="chart" id="${chartId}"></div>
+        <p class="note">Vạch dọc là ngày đang xem. Đơn vị ${unit()}.</p>
       </section>
-      ${inVn && vnRows ? `<section class="block"><h2>Bảng giá trong nước ngày ${fmtShort(d)}</h2><div class="table-scroll"><table><thead><tr><th scope="col">Triệu đồng/lượng</th><th scope="col">Mua</th><th scope="col">Bán</th><th scope="col">Đổi</th></tr></thead><tbody>${vnRows}</tbody></table></div></section>`
-        : '<p class="stale">Nguồn dữ liệu chưa có giá vàng Việt Nam cho ngày này.</p>'}`;
+      ${inVn && vnRows ? `<section class="block"><h2>Bảng giá trong nước</h2><div class="table-scroll"><table><thead><tr><th scope="col">Triệu đồng/lượng</th><th scope="col">Mua</th><th scope="col">Bán</th><th scope="col">Đổi</th></tr></thead><tbody>${vnRows}</tbody></table></div></section>`
+        : '<p class="note">Nguồn dữ liệu chưa có giá vàng Việt Nam cho ngày này.</p>'}`,
+    };
+  }
 
+  function drawDayChart(chartId, idx) {
+    const m = state.market, rows = series();
+    const r = rows[idx];
     const from = Math.max(0, idx - 30), to = Math.min(rows.length, idx + 31);
     const win = rows.slice(from, to);
-    const color = m === 'vn' ? css('--sjc') : css('--world');
-    drawChart($('ch-day'), {
-      height: 180,
-      marker: tP(r.d),
-      ariaLabel: `Biểu đồ giá quanh ngày ${fmtDate(d)}`,
-      yFmt: (v) => (m === 'vn' ? num(v / 1e6, 0) : '$' + num(v, 0)),
-      series: [{ label: mktName(), color, pts: win.map((x) => [tP(x.d), x.v]), noDot: true }],
+    const color = m === 'vn' ? css('--color-sjc') : css('--color-world');
+    drawChart($(chartId), {
+      height: 170, marker: tP(r.d), restIndex: idx - from, restPrefix: 'Ngày đang xem · ',
+      ariaLabel: `Biểu đồ giá quanh ngày ${fmtDate(r.d)}`, yFmt: yTick(),
+      series: [{ color, pts: win.map((x) => [tP(x.d), x.v]), noDot: true }],
       markers: [{ t: tP(r.d), v: r.v, color }],
-      tip: (t, i) => ({ title: fmtDate(win[i].d), rows: [['Giá', valFmt(win[i].v)]], dots: [{ v: win[i].v, color }] }),
+      tip: (i) => ({ title: fmtDate(win[i].d), rows: [['Giá', valFmt(win[i].v), color]], dots: [{ v: win[i].v, color }] }),
     });
+  }
 
-    $('day-prev').disabled = idx === 0 && rows[0].d >= d;
+  // Cập nhật phần chi tiết tại chỗ. Ô chọn ngày không bị vẽ lại, để bánh xe chọn ngày trên iPhone không tự đóng.
+  function syncDay() {
+    const rows = series(), d = state.day;
+    const body = dayDetailHtml(d, 'ch-day');
+    $('day-body').innerHTML = body.html;
+    drawDayChart('ch-day', body.idx);
+    $('day-prev').disabled = d <= rows[0].d;
     $('day-next').disabled = d >= rows[rows.length - 1].d;
+    $('day-latest').hidden = d >= rows[rows.length - 1].d;
+    document.querySelectorAll('#day-list .list-btn').forEach((b) => b.setAttribute('aria-current', b.dataset.act === 'dayopen:' + d));
+  }
 
-    const recent = rows.slice(-30).map((x, i, a) => {
-      const q = i > 0 ? a[i - 1] : rows[rows.length - 31];
+  function renderDayList() {
+    const rows = series();
+    const n = Math.min(state.dayLimit, rows.length - 1);
+    const recent = rows.slice(-n).map((x, i) => {
+      const q = rows[rows.length - n + i - 1];
       return { ...x, c: q ? (x.v / q.v - 1) * 100 : 0 };
     }).reverse();
-    $('day-list').innerHTML = recent.map((x) => `<button class="list-btn" type="button" data-act="day:${x.d}" aria-current="${x.d === d}"><span class="ld">${fmtDate(x.d)}</span><span class="lv">${valFmt(x.v)}</span><span class="pill ${dirClass(x.c)}">${arrow(x.c)} ${pct(x.c)}</span></button>`).join('');
+    $('day-list').innerHTML = recent.map((x) => `<button class="list-btn" type="button" data-act="dayopen:${x.d}" aria-current="${x.d === state.day}"><span class="ld">${fmtDate(x.d)}</span><span class="lv">${valFmt(x.v)}</span><span class="pill ${dirClass(x.c)}">${arrow(x.c)} ${pct(x.c)}</span></button>`).join('');
+    $('day-more').hidden = state.dayLimit >= rows.length - 1;
+  }
+
+  function stepDay(dir) {
+    const rows = series();
+    let d = state.day;
+    if (state.market === 'vn') d = E.addDays(d, dir);
+    else {
+      const next = dir > 0 ? rows.find((r) => r.d > d) : [...rows].reverse().find((r) => r.d < d);
+      if (next) d = next.d;
+    }
+    if (d < rows[0].d || d > rows[rows.length - 1].d) return;
+    state.day = d;
+    $('day-input').value = d;
+    syncDay();
   }
 
   // ---------- Theo đợt ----------
@@ -459,7 +529,7 @@
     const f = chg(ds.fx, 'v');
     if (f != null) out.push(['USD/VND cùng kỳ', pct(f)]);
     const prem = premium().filter((p) => p.d >= from && p.d <= to);
-    if (prem.length >= 2) out.push(['Chênh so với thế giới', `${pct(prem[0].pct)} → ${pct(prem[prem.length - 1].pct)}`]);
+    if (prem.length >= 2) out.push(['Cao hơn thế giới', `${pct(prem[0].pct)} → ${pct(prem[prem.length - 1].pct)}`]);
     return out;
   }
 
@@ -488,82 +558,86 @@
     </dl>`;
   }
 
+  const allWaves = () => cached('w:' + state.market + state.type + state.th, () => E.detectWaves(series().map((r) => ({ d: r.d, p: r.v })), state.th));
+
   function renderWaves() {
     const m = state.market, rows = series();
-    const pts = rows.map((r) => ({ d: r.d, p: r.v }));
-    const waves = E.detectWaves(pts, state.th);
+    const waves = allWaves();
     const days = state.waveRange[m];
     const startD = days ? E.addDays(rows[rows.length - 1].d, -days) : rows[0].d;
     const shown = waves.filter((w) => w.to >= startD);
     const sum = E.waveSummary(shown);
-    const sel = state.wave && shown.find((w) => w.from === state.wave) || null;
-
-    const stat = (s, lab, cls) => s ? `<div><span class="k ${cls}">${arrow(cls === 'up' ? 1 : -1)} ${lab}</span><span class="v">${pct(s.avgPct)}</span><span class="s">Trung bình ${num(s.avgDays, 0)} ngày, ${s.n} đợt đã kết thúc</span></div>`
-      : `<div><span class="k ${cls}">${arrow(cls === 'up' ? 1 : -1)} ${lab}</span><span class="s">Chưa có đợt nào đã kết thúc</span></div>`;
-
+    const stat = (s, lab, cls) => (s
+      ? `<div><span class="k ${cls}">${arrow(cls === 'up' ? 1 : -1)} ${lab}</span><span class="v">${pct(s.avgPct)}</span><span class="s">Trung bình ${num(s.avgDays, 0)} ngày, ${s.n} đợt</span></div>`
+      : `<div><span class="k ${cls}">${arrow(cls === 'up' ? 1 : -1)} ${lab}</span><span class="s">Chưa có đợt nào kết thúc</span></div>`);
     const list = [...shown].reverse().slice(0, state.waveLimit);
+
     view.innerHTML = `
       <section class="block">
         <h2>Các đợt tăng, giảm của ${esc(mktName())}</h2>
-        <p class="note">Một đợt kết thúc khi giá quay đầu từ đỉnh hoặc đáy vượt ngưỡng bạn chọn. Ngưỡng càng lớn thì càng ít đợt, mỗi đợt càng dài.</p>
-        <div class="chips" role="group" aria-label="Ngưỡng đảo chiều">
-          ${[3, 5, 10].map((t) => `<button id="th-${t}" class="chip" type="button" data-act="th:${t}" aria-pressed="${state.th === t}">${t === 3 ? 'Đợt nhỏ' : t === 5 ? 'Đợt vừa' : 'Đợt lớn'} ≥${t}%</button>`).join('')}
+        <p class="note">Một đợt kết thúc khi giá quay đầu quá mức bạn chọn dưới đây.</p>
+        <div class="chips" role="group" aria-label="Mức quay đầu để tính là đợt mới">
+          ${[[3, 'Nhỏ 3%'], [5, 'Vừa 5%'], [10, 'Lớn 10%']].map(([t, l]) => `<button id="th-${t}" class="chip" type="button" data-act="th:${t}" aria-pressed="${state.th === t}">${l}</button>`).join('')}
         </div>
         ${m === 'world' ? rangeChips(days, 'wrange') : ''}
         <div class="chart" id="ch-wave"></div>
-        ${legend([{ label: 'Đợt tăng', color: css('--up') }, { label: 'Đợt giảm', color: css('--down') }])}
+        ${legend([{ label: 'Đợt tăng', color: css('--color-up') }, { label: 'Đợt giảm', color: css('--color-down') }])}
       </section>
-      ${sel ? `<section class="block">
-        <h2>Đợt ${sel.dir > 0 ? 'tăng' : 'giảm'} ${fmtDate(sel.from)} đến ${fmtDate(sel.to)}${sel.ongoing ? ' (đang diễn ra)' : ''}</h2>
-        ${periodHtml(periodRows(rows, sel.from, sel.to))}
-        <button id="wave-clear" class="link-btn" type="button" data-act="wave:">Xem lại toàn bộ</button>
-      </section>` : ''}
       <section class="stat-pair">${stat(sum.up, 'Đợt tăng', 'up')}${stat(sum.down, 'Đợt giảm', 'down')}</section>
       <section class="block">
         <h2>${shown.length} đợt, mới nhất trước</h2>
-        <div>${list.map((w) => `<button class="wave-btn" type="button" data-act="wave:${w.from}" aria-current="${!!sel && sel.from === w.from}">
-          <span class="pill ${dirClass(w.dir)}">${arrow(w.dir)}</span>
+        <div>${list.map((w) => `<button class="wave-btn" type="button" data-act="wave:${w.from}">
+          <span class="pill ${dirClass(w.dir)}" aria-label="${w.dir > 0 ? 'Đợt tăng' : 'Đợt giảm'}">${arrow(w.dir)}</span>
           <span class="wd">${fmtShort(w.from)}/${w.from.slice(2, 4)} → ${fmtShort(w.to)}/${w.to.slice(2, 4)}</span>
           <span class="wp ${dirClass(w.dir)}">${pct(w.pct)}</span>
           <span class="wm">${w.days} ngày · ${valFmt(w.startP)} → ${valFmt(w.endP)}${w.ongoing ? ' · đang diễn ra' : ''}</span>
-        </button>`).join('') || '<p class="note">Giá chưa đảo chiều đủ ngưỡng này trong khoảng đang xem.</p>'}</div>
-        ${shown.length > state.waveLimit ? `<button id="wave-more" class="link-btn" type="button" data-act="wavemore:1">Xem thêm ${Math.min(20, shown.length - state.waveLimit)} đợt</button>` : ''}
+        </button>`).join('') || '<p class="note">Giá chưa quay đầu đủ mức này trong khoảng đang xem.</p>'}</div>
+        ${shown.length > state.waveLimit ? `<button id="wave-more" class="text-btn more-btn" type="button" data-act="wavemore:1">Xem thêm ${Math.min(20, shown.length - state.waveLimit)} đợt</button>` : ''}
       </section>
-      <section class="block">
-        <h2>Tự chọn một đợt</h2>
+      ${fold('d-range', 'Tự chọn khoảng ngày', '', `
         <div class="date-pair">
           <label for="range-from">Từ ngày<input id="range-from" type="date" min="${rows[0].d}" max="${rows[rows.length - 1].d}" value="${state.rangeFrom || E.addDays(rows[rows.length - 1].d, -90)}"></label>
           <label for="range-to">Đến ngày<input id="range-to" type="date" min="${rows[0].d}" max="${rows[rows.length - 1].d}" value="${state.rangeTo || rows[rows.length - 1].d}"></label>
         </div>
-        <div id="range-result"></div>
-      </section>`;
+        <div id="range-result"></div>`)}`;
 
-    const up = css('--up'), dn = css('--down'), base = css('--muted');
-    let vis = rows.filter((r) => r.d >= startD);
-    let segs = shown;
-    if (sel) {
-      const pad = Math.max(5, Math.round(sel.days * 0.25));
-      const a = E.addDays(sel.from, -pad), b = E.addDays(sel.to, pad);
-      vis = rows.filter((r) => r.d >= a && r.d <= b);
-      segs = waves.filter((w) => w.to >= a && w.from <= b);
-    }
-    const lo = vis[0].d, hi = vis[vis.length - 1].d;
+    const up = css('--color-up'), dn = css('--color-down'), base = css('--color-muted');
+    const vis = rows.filter((r) => r.d >= startD);
     drawChart($('ch-wave'), {
-      ariaLabel: 'Biểu đồ các đợt tăng giảm giá vàng',
-      yFmt: (v) => (m === 'vn' ? num(v / 1e6, 0) : '$' + num(v, 0)),
-      shade: sel ? { from: tP(sel.from), to: tP(sel.to) } : null,
-      series: [{ label: mktName(), color: base, pts: vis.map((r) => [tP(r.d), r.v]), width: 1, noDot: true }],
-      segments: segs.map((w) => ({
+      ariaLabel: 'Biểu đồ các đợt tăng giảm giá vàng', yFmt: yTick(),
+      series: [{ color: base, pts: vis.map((r) => [tP(r.d), r.v]), width: 1, noDot: true }],
+      segments: shown.map((w) => ({
         color: w.dir > 0 ? up : dn,
-        width: sel && sel.from === w.from ? 3 : 2,
-        pts: rows.slice(w.i0, w.i1 + 1).filter((r) => r.d >= lo && r.d <= hi).map((r) => [tP(r.d), r.v]),
+        pts: rows.slice(w.i0, w.i1 + 1).filter((r) => r.d >= startD).map((r) => [tP(r.d), r.v]),
       })).filter((s) => s.pts.length > 1),
-      tip: (t, i) => {
+      tip: (i) => {
         const w = waves.find((x) => vis[i].d >= x.from && vis[i].d <= x.to);
-        return { title: fmtDate(vis[i].d), rows: [['Giá', valFmt(vis[i].v)]].concat(w ? [[w.dir > 0 ? 'Trong đợt tăng' : 'Trong đợt giảm', pct(w.pct)]] : []), dots: [{ v: vis[i].v, color: base }] };
+        return { title: fmtDate(vis[i].d), rows: [['Giá', valFmt(vis[i].v)]].concat(w ? [[w.dir > 0 ? 'Trong đợt tăng' : 'Trong đợt giảm', pct(w.pct)]] : []), dots: [{ v: vis[i].v, color: w ? (w.dir > 0 ? up : dn) : base }] };
       },
     });
-    renderRange();
+    wireFold('d-range', renderRange);
+  }
+
+  function openWave(from) {
+    const rows = series();
+    const w = allWaves().find((x) => x.from === from);
+    if (!w) return;
+    openSheet(`Đợt ${w.dir > 0 ? 'tăng' : 'giảm'} ${fmtShort(w.from)} đến ${fmtShort(w.to)}${w.ongoing ? ', đang diễn ra' : ''}`,
+      `<div class="chart" id="ch-sheet"></div>${periodHtml(periodRows(rows, w.from, w.to))}`, () => {
+        const pad = Math.max(5, Math.round(w.days * 0.25));
+        const a = E.addDays(w.from, -pad), b = E.addDays(w.to, pad);
+        const vis = rows.filter((r) => r.d >= a && r.d <= b);
+        const color = w.dir > 0 ? css('--color-up') : css('--color-down');
+        const inWave = rows.filter((r) => r.d >= w.from && r.d <= w.to);
+        drawChart($('ch-sheet'), {
+          height: 170, ariaLabel: `Biểu đồ đợt từ ${fmtDate(w.from)} đến ${fmtDate(w.to)}`, yFmt: yTick(),
+          shade: { from: tP(w.from), to: tP(w.to) },
+          restIndex: vis.findIndex((r) => r.d === w.to), restPrefix: 'Cuối đợt · ',
+          series: [{ color: css('--color-muted'), pts: vis.map((r) => [tP(r.d), r.v]), width: 1, noDot: true }],
+          segments: [{ color, width: 3, pts: inWave.map((r) => [tP(r.d), r.v]) }],
+          tip: (i) => ({ title: fmtDate(vis[i].d), rows: [['Giá', valFmt(vis[i].v)]], dots: [{ v: vis[i].v, color }] }),
+        });
+      });
   }
 
   function renderRange() {
@@ -582,35 +656,35 @@
   const bt = () => cached('bt:' + state.market + state.type, () => (state.market === 'vn' ? E.backtestVN(ds, state.type) : E.backtestWorld(ds.world)));
 
   function verdict(r) {
-    if (!r || r.tooFew) return '<span class="pill gold verdict">Chưa đủ dữ liệu</span>';
-    if (r.skill >= 3) return '<span class="pill up verdict">Nhỉnh hơn</span>';
-    if (r.skill <= -3) return '<span class="pill down verdict">Kém hơn</span>';
-    return '<span class="pill gold verdict">Ngang nhau</span>';
+    if (!r || r.tooFew) return '<span class="pill gold">Chưa đủ</span>';
+    if (r.skill >= 3) return '<span class="pill up">Nhỉnh hơn</span>';
+    if (r.skill <= -3) return '<span class="pill down">Kém hơn</span>';
+    return '<span class="pill gold">Ngang nhau</span>';
   }
 
   function renderForecast() {
     const m = state.market, rows = series(), F = fc();
     const f = F.find((x) => x.cal === state.horizon) || F[1];
     const lastV = rows[rows.length - 1].v;
-    const moneyV = (v) => (m === 'vn' ? tr(v) + ' triệu' : usd(v, 0));
-    const when = f.cal === 1 ? 'ngày mai' : `sau ${f.cal} ngày (${fmtDate(f.date)})`;
+    const when = f.cal === 1 ? 'ngày mai' : `sau ${f.cal} ngày, ${fmtDate(f.date)}`;
+    const q = (v) => (m === 'vn' ? tr(v) : usd(v, 0));
 
     let lagLine = '';
     if (m === 'vn') {
       const pr = premium();
       const lastChange = (pr[pr.length - 1].conv / pr[pr.length - 2].conv - 1) * 100;
       const move = Math.abs(lastChange) < 0.05 ? 'gần như đứng giá' : `${lastChange > 0 ? 'tăng' : 'giảm'} ${num(Math.abs(lastChange), 2)}%`;
-      lagLine = `<p class="note">Tín hiệu một ngày: giá thế giới quy đổi hôm nay ${move}. Lịch sử cho thấy ${esc(vnName())} thường đi theo khoảng ${num((F[0].k || 0) * 100, 0)}% mức thay đổi đó vào hôm sau.</p>`;
+      lagLine = `<p class="note">Giá thế giới quy đổi hôm nay ${move}. ${esc(vnName())} thường đi theo khoảng ${num((F[0].k || 0) * 100, 0)}% mức thay đổi đó vào hôm sau.</p>`;
     }
 
     view.innerHTML = `
       <section class="board">
-        <div class="board-label">${esc(mktName())} · dự báo ${when}</div>
-        <div class="price" style="font-size:clamp(32px,10vw,44px)">${m === 'vn' ? `${tr(f.lo80)} – ${tr(f.hi80)}` : `${usd(f.lo80, 0)} – ${usd(f.hi80, 0)}`}${m === 'vn' ? '<small>triệu/lượng</small>' : ''}</div>
-        <div class="delta flat">Khoảng có khả năng 80%, giá hiện tại ${moneyV(lastV)}</div>
+        <div class="board-label">${esc(mktName())} · ${when}</div>
+        <div class="price range">${q(f.lo80)} – ${q(f.hi80)}${m === 'vn' ? '<small>triệu/lượng</small>' : ''}</div>
+        <div class="delta flat">Khả năng 80% giá nằm trong khoảng này. Giá hiện tại ${q(lastV)}${m === 'vn' ? ' triệu' : ''}.</div>
         <dl class="board-grid">
-          <div><dt>Giá giữa khoảng</dt><dd>${m === 'vn' ? tr(f.point) : usd(f.point, 0)} <span>${pct((f.point / lastV - 1) * 100)}</span></dd></div>
-          <div><dt>Khoảng rộng hơn, 95%</dt><dd style="font-size:14px">${m === 'vn' ? `${tr(f.lo95)} – ${tr(f.hi95)}` : `${usd(f.lo95, 0)} – ${usd(f.hi95, 0)}`}</dd></div>
+          <div><dt>Giữa khoảng</dt><dd>${q(f.point)} <span>${pct((f.point / lastV - 1) * 100)}</span></dd></div>
+          <div><dt>Khoảng rộng hơn, 95%</dt><dd>${q(f.lo95)} – ${q(f.hi95)}</dd></div>
         </dl>
       </section>
       <section class="block">
@@ -621,50 +695,61 @@
         <div id="lg-fc"></div>
         ${lagLine}
       </section>
-      <section class="block">
-        <h2>Tất cả các kỳ</h2>
-        <div class="table-scroll"><table class="compact">
-          <thead><tr><th scope="col">Kỳ</th><th scope="col">Giữa</th><th scope="col">Khoảng 80%</th><th scope="col">Khoảng 95%</th></tr></thead>
-          <tbody>${F.map((x) => { const q = (v) => (m === 'vn' ? tr(v) : num(v, 0)); return `<tr class="${x.cal === f.cal ? 'hl' : ''}"><td>${x.cal} ngày</td><td>${q(x.point)}</td><td>${q(x.lo80)}–${q(x.hi80)}</td><td>${q(x.lo95)}–${q(x.hi95)}</td></tr>`; }).join('')}</tbody>
-        </table></div>
-        <p class="note">Đơn vị: ${unit()}.</p>
-      </section>
       <section class="block" id="bt-block">
-        <h2>Mô hình này đáng tin đến đâu</h2>
-        <p class="note">Đang kiểm định trên dữ liệu quá khứ…</p>
+        <h2>Mô hình đáng tin đến đâu</h2>
+        <p class="note">Đang kiểm tra trên dữ liệu quá khứ…</p>
       </section>
       <section class="block">
         <h2>Tính thử theo kịch bản</h2>
-        <p class="note">Tự đặt giá thế giới, tỷ giá và mức chênh để xem giá trong nước tương ứng.</p>
         <div id="scn"></div>
       </section>
-      <p class="note">Đây là thống kê từ dữ liệu quá khứ, không phải khuyến nghị mua bán. Tin tức, chính sách và nguồn cung vàng trong nước có thể làm giá đi ra ngoài các khoảng trên.</p>`;
+      ${fold('d-all', 'Bảng dự báo tất cả các kỳ', '', `<div class="table-scroll"><table>
+          <thead><tr><th scope="col">Kỳ</th><th scope="col">Giữa</th><th scope="col">Khoảng 80%</th><th scope="col">Khoảng 95%</th></tr></thead>
+          <tbody>${F.map((x) => { const s = (v) => (m === 'vn' ? tr(v) : num(v, 0)); return `<tr class="${x.cal === f.cal ? 'hl' : ''}"><td>${x.cal} ngày</td><td>${s(x.point)}</td><td>${s(x.lo80)}–${s(x.hi80)}</td><td>${s(x.lo95)}–${s(x.hi95)}</td></tr>`; }).join('')}</tbody>
+        </table></div><p class="note">Đơn vị ${unit()}.</p>`)}
+      <p class="note">Đây là thống kê từ dữ liệu quá khứ, không phải khuyến nghị mua bán. Tin tức và chính sách có thể đưa giá ra ngoài các khoảng trên.</p>`;
 
     drawForecastChart(f, F);
     renderScenario();
+    wireFold('d-all');
     setTimeout(() => { if (state.tab === 'du-bao' && $('bt-block')) renderBacktest(); }, 30);
   }
 
   function drawForecastChart(f, F) {
     const m = state.market, rows = series();
-    const color = m === 'vn' ? css('--sjc') : css('--world');
+    const color = m === 'vn' ? css('--color-sjc') : css('--color-world');
     const hist = rows.slice(-Math.max(45, m === 'vn' ? f.cal * 2 : Math.round(f.cal * 1.4)));
     const last = rows[rows.length - 1];
-    const anchors = F.filter((x) => x.cal <= f.cal);
-    const t = (d) => tP(d);
-    const b80 = [[t(last.d), last.v, last.v], ...anchors.map((x) => [t(x.date), x.lo80, x.hi80])];
-    const b95 = [[t(last.d), last.v, last.v], ...anchors.map((x) => [t(x.date), x.lo95, x.hi95])];
-    const mid = [[t(last.d), last.v], ...anchors.map((x) => [t(x.date), x.point])];
+    const anchors = [{ cal: 0, point: last.v, lo80: last.v, hi80: last.v, lo95: last.v, hi95: last.v }, ...F.filter((x) => x.cal <= f.cal)];
+    const lerp = (a, b, k, key) => a[key] + (b[key] - a[key]) * k;
+    const future = [];
+    for (let i = 0; i + 1 < anchors.length; i++) {
+      const a = anchors[i], b = anchors[i + 1];
+      for (let c = a.cal + 1; c <= b.cal; c++) {
+        const k = (c - a.cal) / (b.cal - a.cal);
+        const date = E.addDays(last.d, c);
+        future.push({ d: date, t: tP(date), point: lerp(a, b, k, 'point'), lo80: lerp(a, b, k, 'lo80'), hi80: lerp(a, b, k, 'hi80'), lo95: lerp(a, b, k, 'lo95'), hi95: lerp(a, b, k, 'hi95') });
+      }
+    }
+    const axis = [...hist.map((r) => [tP(r.d), r.v]), ...future.map((x) => [x.t, x.point])];
+    const t0 = tP(last.d);
     drawChart($('ch-fc'), {
-      ariaLabel: `Biểu đồ giá lịch sử và khoảng dự báo ${f.cal} ngày`,
-      yFmt: (v) => (m === 'vn' ? num(v / 1e6, 0) : '$' + num(v, 0)),
-      bands: [{ pts: b95, color, opacity: 0.14 }, { pts: b80, color, opacity: 0.24 }],
-      series: [
-        { label: 'Lịch sử', color, pts: hist.map((r) => [t(r.d), r.v]), noDot: true },
-        { label: 'Giữa khoảng', color, pts: mid, dash: '4 3', width: 1.5 },
+      ariaLabel: `Biểu đồ giá lịch sử và khoảng dự báo ${f.cal} ngày`, yFmt: yTick(),
+      axis, restIndex: hist.length - 1,
+      bands: [
+        { pts: [[t0, last.v, last.v], ...future.map((x) => [x.t, x.lo95, x.hi95])], color, opacity: 0.14 },
+        { pts: [[t0, last.v, last.v], ...future.map((x) => [x.t, x.lo80, x.hi80])], color, opacity: 0.24 },
       ],
-      markers: [{ t: t(last.d), v: last.v, color }],
-      tip: (tt, i) => ({ title: fmtDate(hist[i].d), rows: [['Giá', valFmt(hist[i].v)]], dots: [{ v: hist[i].v, color }] }),
+      series: [
+        { color, pts: hist.map((r) => [tP(r.d), r.v]), noDot: true },
+        { color, pts: [[t0, last.v], ...future.map((x) => [x.t, x.point])], dash: '4 3', width: 1.5 },
+      ],
+      markers: [{ t: t0, v: last.v, color }],
+      tip: (i) => {
+        if (i < hist.length) return { title: fmtDate(hist[i].d), rows: [['Giá', valFmt(hist[i].v), color]], dots: [{ v: hist[i].v, color }] };
+        const x = future[i - hist.length];
+        return { title: `Dự báo · ${fmtDate(x.d)}`, rows: [['Giữa', valFmt(x.point), color], ['Khoảng 80%', `${valFmt(x.lo80)} – ${valFmt(x.hi80)}`]], dots: [{ v: x.point, color }] };
+      },
     });
     $('lg-fc').innerHTML = legend([{ label: 'Giá đã có', color }, { label: 'Giữa khoảng', color, dash: true }, { label: 'Khoảng 80%', color, swatch: true, opacity: 0.45 }, { label: 'Khoảng 95%', color, swatch: true, opacity: 0.2 }]);
   }
@@ -674,55 +759,112 @@
     const keys = Object.keys(R);
     const rowsHtml = keys.map((k) => {
       const r = R[k];
-      if (r.tooFew) return `<tr><td>${parseInt(k, 10)} ngày</td><td>–</td><td>–</td><td>–</td><td>${verdict(r)}</td></tr>`;
-      const model = m === 'vn' ? r.maeModel : r.maeBlend;
-      return `<tr><td>${parseInt(k, 10)} ngày</td><td>${num(model, 2)}%</td><td>${num(r.maeNaive, 2)}%</td><td>${num(r.cover80, 0)}%</td><td>${verdict(r)}</td></tr>`;
+      if (r.tooFew) return `<tr><td>${parseInt(k, 10)} ngày</td><td>–</td><td>–</td><td>${verdict(r)}</td></tr>`;
+      return `<tr><td>${parseInt(k, 10)} ngày</td><td>${num(m === 'vn' ? r.maeModel : r.maeBlend, 2)}%</td><td>${num(r.maeNaive, 2)}%</td><td>${verdict(r)}</td></tr>`;
     }).join('');
     const d1 = R['1d'], d30 = R['30d'];
+    const covers = keys.map((k) => R[k]).filter((r) => !r.tooFew).map((r) => r.cover80);
+    const coverLine = covers.length ? `Giá thật nằm trong khoảng 80% ở ${num(Math.min(...covers), 0)}–${num(Math.max(...covers), 0)}% số lần thử.` : '';
     const lede = m === 'vn'
-      ? `Kiểm định trên ${series().length} ngày dữ liệu. Với kỳ dài, mô hình không dự báo hướng tốt hơn giả định giá giữ nguyên, nên hãy dùng khoảng giá thay vì con số giữa. Tín hiệu đáng kể duy nhất là kỳ 1 ngày: ${d1 && d1.dirHit != null ? `đúng hướng <b>${num(d1.dirHit, 0)}%</b> trong ${d1.calls} lần giá thực sự đổi` : 'chưa đủ dữ liệu'}.`
-      : `Kiểm định trên 5 năm gần nhất. Mô hình gần như không thắng giả định giá giữ nguyên. Ở kỳ 30 ngày, nó đúng hướng ${num(d30.dirHit, 0)}%, trong khi giá vốn đã tăng ở ${num(d30.baseUp, 0)}% số lần, nghĩa là chưa có năng lực đoán hướng thực sự. Phần đáng tin hơn là độ rộng của khoảng giá.`;
+      ? `Hãy dùng khoảng giá, đừng dựa vào con số giữa. Với kỳ dài, mô hình không đoán hướng tốt hơn giả định giá đứng yên. Tín hiệu đáng kể duy nhất là kỳ 1 ngày: ${d1 && d1.dirHit != null ? `đúng hướng <b>${num(d1.dirHit, 0)}%</b> trong ${d1.calls} lần giá thực sự đổi` : 'chưa đủ dữ liệu'}.`
+      : `Hãy dùng khoảng giá, đừng dựa vào con số giữa. Ở kỳ 30 ngày, mô hình đúng hướng ${num(d30.dirHit, 0)}%, trong khi giá vốn đã tăng ở ${num(d30.baseUp, 0)}% số lần, nên chưa có năng lực đoán hướng thực sự.`;
     $('bt-block').innerHTML = `
-      <h2>Mô hình này đáng tin đến đâu</h2>
+      <h2>Mô hình đáng tin đến đâu</h2>
       <p class="lede">${lede}</p>
-      <div class="table-scroll"><table class="compact">
-        <thead><tr><th scope="col">Kỳ</th><th scope="col">Mô hình</th><th scope="col">Giữ giá</th><th scope="col">Lọt 80%</th><th scope="col">So sánh</th></tr></thead>
+      <div class="table-scroll"><table>
+        <thead><tr><th scope="col">Kỳ</th><th scope="col">Mô hình<br>lệch</th><th scope="col">Giá đứng<br>yên lệch</th><th scope="col">So sánh</th></tr></thead>
         <tbody>${rowsHtml}</tbody>
       </table></div>
-      <p class="note">Cột Mô hình và Giữ giá là sai số trung bình của mô hình và của giả định giá không đổi. Cột Lọt 80% là tỷ lệ giá thật nằm trong khoảng 80%, càng gần 80% càng sát thực tế. Mỗi lần thử, mô hình chỉ được biết dữ liệu đến thời điểm đó.${m === 'vn' ? ' Dữ liệu trong nước mới khoảng một năm, nên kết quả này còn có thể thay đổi nhiều.' : ''}</p>`;
+      <p class="note">${coverLine} Kiểm tra trên ${m === 'vn' ? `${series().length} ngày dữ liệu, còn ngắn nên kết quả có thể thay đổi nhiều` : '5 năm gần nhất'}. Mỗi lần thử, mô hình chỉ biết dữ liệu đến thời điểm đó.</p>`;
   }
 
-  function renderScenario() {
-    const w = ds.world[ds.world.length - 1].p, fx = ds.fx[ds.fx.length - 1].v;
+  function scnDefaults() {
     const prem = premium(), base = prem[prem.length - 1];
+    return { w: Math.round(ds.world[ds.world.length - 1].p), fx: Math.round(ds.fx[ds.fx.length - 1].v / 10) * 10, p: Math.round(base.pct * 2) / 2 };
+  }
+  function renderScenario() {
     const key = ds.sourceDates.vn + state.type;
-    if (!state.scn || state.scn.key !== key) state.scn = { key, w: Math.round(w), fx: Math.round(fx / 10) * 10, p: Math.round(base.pct * 2) / 2 };
-    const s = state.scn;
-    const wMin = Math.round(w * 0.7 / 10) * 10, wMax = Math.round(w * 1.3 / 10) * 10;
+    if (!state.scn || state.scn.key !== key) state.scn = { key, ...scnDefaults() };
+    const s = state.scn, d = scnDefaults();
+    const row = (id, label, min, max, step, val, mode) => `<div class="scn-row">
+        <label for="${id}-n">${esc(label)}</label>
+        <input id="${id}-n" type="number" inputmode="${mode}" min="${min}" max="${max}" step="${step}" value="${val}">
+        <input id="${id}" type="range" min="${min}" max="${max}" step="${step}" value="${val}" aria-label="${esc(label)}">
+      </div>`;
     $('scn').innerHTML = `<div class="scn">
-      <label for="scn-w">Giá thế giới <output id="o-w"></output><input id="scn-w" type="range" min="${wMin}" max="${wMax}" step="10" value="${s.w}"></label>
-      <label for="scn-fx">USD/VND <output id="o-fx"></output><input id="scn-fx" type="range" min="${Math.round(fx * 0.92 / 10) * 10}" max="${Math.round(fx * 1.08 / 10) * 10}" step="10" value="${s.fx}"></label>
-      <label for="scn-p">Trong nước cao hơn thế giới <output id="o-p"></output><input id="scn-p" type="range" min="0" max="30" step="0.5" value="${s.p}"></label>
+      ${row('scn-w', 'Giá thế giới, USD/oz', Math.round(d.w * 0.5 / 10) * 10, Math.round(d.w * 1.5 / 10) * 10, 10, s.w, 'numeric')}
+      ${row('scn-fx', 'Tỷ giá USD/VND', Math.round(d.fx * 0.9 / 10) * 10, Math.round(d.fx * 1.1 / 10) * 10, 10, s.fx, 'numeric')}
+      ${row('scn-p', 'Trong nước cao hơn thế giới, %', 0, 40, 0.5, s.p, 'decimal')}
       <div class="scn-result" aria-live="polite"><span class="s">${esc(vnName())} bán ra ước tính</span><span class="v" id="o-res"></span><span class="s" id="o-diff"></span></div>
+      <button id="scn-reset" class="text-btn more-btn" type="button" data-act="scn:reset">Về giá hiện tại</button>
     </div>`;
     updateScenario();
   }
   function updateScenario() {
     const s = state.scn;
-    s.w = +$('scn-w').value; s.fx = +$('scn-fx').value; s.p = +$('scn-p').value;
-    const res = s.w * s.fx * E.OZ_PER_LUONG * (1 + s.p / 100);
+    const w = parseFloat($('scn-w-n').value), fx = parseFloat($('scn-fx-n').value), p = parseFloat($('scn-p-n').value);
+    if (!(w > 0) || !(fx > 0) || !(p >= 0)) {
+      $('o-res').textContent = '–';
+      $('o-diff').textContent = 'Nhập đủ ba con số, không để trống.';
+      return;
+    }
+    s.w = w; s.fx = fx; s.p = p;
+    const res = w * fx * E.OZ_PER_LUONG * (1 + p / 100);
     const prem = premium(), cur = prem[prem.length - 1].sell;
-    $('o-w').textContent = '$' + num(s.w, 0);
-    $('o-fx').textContent = num(s.fx, 0);
-    $('o-p').textContent = num(s.p, 1) + '%';
-    $('o-res').textContent = tr(res) + ' triệu/lượng';
     const d = res - cur;
+    $('o-res').textContent = tr(res) + ' triệu/lượng';
     $('o-diff').textContent = `${d >= 0 ? 'Cao' : 'Thấp'} hơn giá hiện tại ${tr(Math.abs(d))} triệu (${pct((res / cur - 1) * 100)})`;
   }
 
+  // ---------- Tấm trượt chi tiết ----------
+  const sheet = $('sheet');
+  function openSheet(title, html, after) {
+    $('sheet-title').textContent = title;
+    $('sheet-body').innerHTML = html;
+    $('sheet-body').scrollTop = 0;
+    sheet.classList.remove('closing');
+    sheet.style.transform = '';
+    document.documentElement.classList.add('sheet-open');
+    sheet.showModal();
+    if (after) after();
+  }
+  function closeSheet() {
+    if (!sheet.open) return;
+    const done = () => {
+      sheet.close();
+      sheet.classList.remove('closing');
+      sheet.style.transform = '';
+      document.documentElement.classList.remove('sheet-open');
+      if (pendingRender) { pendingRender = false; render(); }
+    };
+    if (matchMedia('(prefers-reduced-motion: reduce)').matches) { done(); return; }
+    sheet.style.transform = '';
+    sheet.classList.add('closing');
+    setTimeout(done, 130);
+  }
+  sheet.addEventListener('cancel', (e) => { e.preventDefault(); closeSheet(); });
+  sheet.addEventListener('click', (e) => { if (e.target === sheet) closeSheet(); });
+  (function dragToClose() {
+    const grip = $('sheet-grip');
+    let startY = null;
+    grip.addEventListener('pointerdown', (e) => { startY = e.clientY; grip.setPointerCapture(e.pointerId); });
+    grip.addEventListener('pointermove', (e) => { if (startY != null) sheet.style.transform = `translateY(${Math.max(0, e.clientY - startY)}px)`; });
+    const end = (e) => {
+      if (startY == null) return;
+      const moved = e.clientY - startY;
+      startY = null;
+      if (moved > 80) closeSheet(); else sheet.style.transform = '';
+    };
+    grip.addEventListener('pointerup', end);
+    grip.addEventListener('pointercancel', end);
+  })();
+
   // ---------- Điều phối ----------
-  function render() {
+  let pendingRender = false;
+  function render(keepScroll = true) {
     const focusId = document.activeElement && document.activeElement.id;
+    const y = window.scrollY;
+    activeReset = null;
     $('mkt-vn').setAttribute('aria-pressed', state.market === 'vn');
     $('mkt-world').setAttribute('aria-pressed', state.market === 'world');
     const sel = $('vn-type');
@@ -731,77 +873,98 @@
     TABS.forEach((t) => { const b = $('tab-' + t); if (t === state.tab) b.setAttribute('aria-current', 'page'); else b.removeAttribute('aria-current'); });
     ({ 'tong-quan': renderOverview, ngay: renderDay, dot: renderWaves, 'du-bao': renderForecast })[state.tab]();
     updateStatus();
+    if (keepScroll) window.scrollTo(0, y);
     const again = focusId && $(focusId);
     if (again && again !== document.activeElement && again.tagName !== 'INPUT') again.focus({ preventScroll: true });
   }
 
   function persist() { store.set(UI_KEY, { market: state.market, type: state.type }); }
 
+  function switchTab(tab) {
+    if (tab === state.tab) { window.scrollTo(0, 0); return; } // chạm lại tab đang mở thì về đầu trang, như app iOS
+    state.scroll[state.tab] = window.scrollY;
+    state.tab = tab;
+    try { history.replaceState(null, '', '#' + tab); } catch (err) { location.hash = tab; }
+    render(false);
+    window.scrollTo(0, state.scroll[tab] || 0);
+  }
+
   document.addEventListener('click', (e) => {
     const b = e.target.closest('[data-act]');
     if (!b) return;
     const i = b.dataset.act.indexOf(':');
     const act = b.dataset.act.slice(0, i), arg = b.dataset.act.slice(i + 1);
-    if (act === 'tab') {
-      state.tab = arg;
-      if (location.hash.slice(1) !== arg) { try { history.replaceState(null, '', '#' + arg); } catch (err) { location.hash = arg; } }
-      window.scrollTo(0, 0);
-      render();
-    } else if (act === 'market') {
-      state.market = arg; state.wave = null; state.waveLimit = 20; state.day = null; state.rangeFrom = state.rangeTo = null;
+    if (act === 'tab') switchTab(arg);
+    else if (act === 'market') {
+      if (state.market === arg) return;
+      state.market = arg; state.waveLimit = 12; state.day = null; state.rangeFrom = state.rangeTo = null;
       persist(); render();
     } else if (act === 'range') { state.range[state.market] = +arg; render(); }
-    else if (act === 'wrange') { state.waveRange[state.market] = +arg; state.wave = null; state.waveLimit = 20; render(); }
-    else if (act === 'th') { state.th = +arg; state.wave = null; state.waveLimit = 20; render(); }
-    else if (act === 'wave') {
-      state.wave = state.wave === arg ? null : arg || null;
-      render();
-      if (state.wave) window.scrollTo({ top: 0 });
-    } else if (act === 'wavemore') { state.waveLimit += 20; render(); }
+    else if (act === 'wrange') { state.waveRange[state.market] = +arg; state.waveLimit = 12; render(); }
+    else if (act === 'th') { state.th = +arg; state.waveLimit = 12; render(); }
+    else if (act === 'wave') openWave(arg);
+    else if (act === 'wavemore') { state.waveLimit += 20; render(); }
     else if (act === 'hz') { state.horizon = +arg; render(); }
-    else if (act === 'day') { state.day = arg; $('day-input').value = arg; renderDayBody(); window.scrollTo({ top: 0 }); }
+    else if (act === 'day') { state.day = arg; $('day-input').value = arg; syncDay(); }
     else if (act === 'daystep') stepDay(+arg);
+    else if (act === 'daymore') { state.dayLimit += 20; renderDayList(); }
+    else if (act === 'dayopen') {
+      state.day = arg;
+      $('day-input').value = arg;
+      syncDay();
+      const body = dayDetailHtml(arg, 'ch-sheet');
+      openSheet(`${weekday(arg)}, ${fmtDate(arg)}`, body.html, () => drawDayChart('ch-sheet', body.idx));
+    } else if (act === 'sheet') closeSheet();
+    else if (act === 'scn') { state.scn = null; renderScenario(); }
+    else if (act === 'retry') refreshLive(true);
   });
 
-  function stepDay(dir) {
-    const rows = series();
-    let d = state.day;
-    if (state.market === 'vn') d = E.addDays(d, dir);
-    else {
-      const next = dir > 0 ? rows.find((r) => r.d > d) : [...rows].reverse().find((r) => r.d < d);
-      if (next) d = next.d;
-    }
-    if (d < rows[0].d || d > rows[rows.length - 1].d) return;
-    state.day = d;
-    $('day-input').value = d;
-    renderDayBody();
-  }
-
-  // Ô chọn ngày không bị vẽ lại khi đổi giá trị, để bánh xe chọn ngày trên iPhone không tự đóng.
   document.addEventListener('change', (e) => {
     const id = e.target.id;
-    if (id === 'vn-type') { state.type = e.target.value; state.wave = null; state.waveLimit = 20; persist(); render(); }
-    else if (id === 'day-input') { if (e.target.value) { state.day = e.target.value; renderDayBody(); } }
+    if (id === 'vn-type') { state.type = e.target.value; state.waveLimit = 12; persist(); render(); }
+    else if (id === 'day-input') { if (e.target.value) { state.day = e.target.value; syncDay(); } }
     else if (id === 'range-from' || id === 'range-to') renderRange();
   });
-  document.addEventListener('input', (e) => { if (e.target.id && e.target.id.startsWith('scn-')) updateScenario(); });
-  window.addEventListener('hashchange', () => { const h = location.hash.slice(1); if (TABS.includes(h) && h !== state.tab) { state.tab = h; render(); } });
-
-  let resizeTimer, lastW = window.innerWidth;
-  window.addEventListener('resize', () => {
-    if (window.innerWidth === lastW) return; // cuộn trên iOS làm đổi chiều cao thanh địa chỉ, không cần vẽ lại
-    lastW = window.innerWidth;
-    clearTimeout(resizeTimer);
-    resizeTimer = setTimeout(render, 150);
+  document.addEventListener('input', (e) => {
+    const id = e.target.id || '';
+    if (!id.startsWith('scn-')) return;
+    if (id.endsWith('-n')) { const r = $(id.slice(0, -2)); if (e.target.value !== '') r.value = e.target.value; }
+    else $(id + '-n').value = e.target.value;
+    updateScenario();
   });
-  if (window.matchMedia) window.matchMedia('(prefers-color-scheme: dark)').addEventListener?.('change', () => render());
+  window.addEventListener('hashchange', () => { const h = location.hash.slice(1); if (TABS.includes(h) && h !== state.tab) switchTab(h); });
 
-  // ---------- Cập nhật trực tuyến (chỉ bản cài riêng) ----------
+  let resizeTimer, lastWidth = window.innerWidth;
+  window.addEventListener('resize', () => {
+    if (window.innerWidth === lastWidth) return; // cuộn trên iOS làm đổi chiều cao thanh địa chỉ, không cần vẽ lại
+    lastWidth = window.innerWidth;
+    clearTimeout(resizeTimer);
+    resizeTimer = setTimeout(requestRender, 150);
+  });
+  if (window.matchMedia) window.matchMedia('(prefers-color-scheme: dark)').addEventListener?.('change', () => requestRender());
+
+  // Không vẽ lại khi người dùng đang chọn ngày hoặc đang xem tấm trượt.
+  function requestRender() {
+    const a = document.activeElement;
+    if (sheet.open || (a && (a.type === 'date' || a.type === 'number'))) { pendingRender = sheet.open; updateStatus(); return; }
+    render();
+  }
+
+  // ---------- Trạng thái dữ liệu ----------
   let statusText = '';
   function updateStatus(msg) {
-    if (msg) statusText = msg;
-    const base = `Dữ liệu đến ${fmtShort(state.market === 'vn' ? ds.sourceDates.vn : ds.sourceDates.world)}`;
-    $('status').textContent = statusText ? `${statusText} · ${base}` : base;
+    if (msg !== undefined) statusText = msg;
+    const base = `Giá đến ${fmtShort(state.market === 'vn' ? ds.sourceDates.vn : ds.sourceDates.world)}`;
+    $('status').textContent = statusText ? `${base} · ${statusText}` : base;
+  }
+  function setNotice(kind) {
+    const el = $('notice');
+    const until = fmtDate(ds.sourceDates.vn);
+    el.className = 'notice' + (kind === 'error' ? ' error' : '');
+    if (kind === 'snapshot') el.innerHTML = `<span>Bản này dừng ở ngày ${until}. Giá mới nhất: <a href="${SITE_URL}" target="_blank" rel="noopener">mở bản cài lên iPhone</a>.</span>`;
+    else if (kind === 'error') el.innerHTML = `<span>Không lấy được giá mới. Đang hiện dữ liệu đến ${until}.</span><button id="notice-retry" class="text-btn" type="button" data-act="retry:1">Thử lại</button>`;
+    else if (kind === 'stale') el.innerHTML = `<span>Nguồn chưa có giá mới, dữ liệu đang dừng ở ${until}.</span>`;
+    el.hidden = !kind;
   }
 
   async function getJson(url) {
@@ -817,21 +980,22 @@
   let refreshing = false;
   async function refreshLive(manual) {
     if (!STANDALONE || refreshing) return;
-    if (!manual && live.at && Date.now() - live.at < 5 * 60e3) { updateStatus(); return; }
+    if (!manual && live.at && Date.now() - live.at < 5 * 60e3) return;
     refreshing = true;
-    updateStatus('Đang cập nhật');
-    $('refresh').disabled = true;
+    const btn = $('refresh');
+    btn.disabled = true;
+    btn.textContent = 'Đang tải…';
     const lastVn = ds.sourceDates.vn;
     const days = Math.max(3, Math.min(400, E.daysBetween(lastVn, today()) + 3));
     const api = (t) => getJson(`https://www.vang.today/api/prices?type=${t}&days=${days}`);
     const types = Object.keys(RAW.vn);
     const results = await Promise.allSettled([api('XAUUSD'), ...types.map(api), getJson('https://open.er-api.com/v6/latest/USD')]);
     let okCount = 0;
-    const lastW = ds.world[ds.world.length - 1].p;
+    const lastWorld = ds.world[ds.world.length - 1].p;
     if (results[0].status === 'fulfilled' && results[0].value.success) {
       const add = results[0].value.history
         .map((h) => [h.date, h.prices && h.prices.XAUUSD && h.prices.XAUUSD.buy])
-        .filter((r) => r[1] > lastW * 0.6 && r[1] < lastW * 1.5);
+        .filter((r) => r[1] > lastWorld * 0.6 && r[1] < lastWorld * 1.5);
       live.world = merge(live.world || [], add.map((r) => [r[0], Math.round(r[1] * 10) / 10]));
       okCount++;
     }
@@ -851,20 +1015,21 @@
       live.fx = merge(live.fx || [], [[today(), Math.round(fxRes.value.rates.VND)]]);
     }
     refreshing = false;
-    $('refresh').disabled = false;
-    if (okCount === 0) { updateStatus('Không kết nối được'); return; }
+    btn.disabled = false;
+    btn.textContent = 'Làm mới';
+    if (okCount === 0) { setNotice('error'); return; }
     live.at = Date.now();
     store.set(LIVE_KEY, live);
     rebuild();
-    const clock = new Date().toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' });
-    statusText = `Cập nhật ${clock}`;
-    if (document.activeElement && document.activeElement.type === 'date') updateStatus(); else render();
+    statusText = `lúc ${new Date().toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' })}`;
+    setNotice(E.daysBetween(ds.sourceDates.vn, today()) >= 3 ? 'stale' : null);
+    requestRender();
   }
 
   // ---------- Khởi động ----------
   $('vn-type').innerHTML = Object.entries(VN_TYPES).map(([k, v]) => `<option value="${k}">${esc(v)}</option>`).join('');
   rebuild();
-  render();
+  render(false);
   if (STANDALONE) {
     const btn = $('refresh');
     btn.hidden = false;
@@ -872,5 +1037,7 @@
     refreshLive(false);
     document.addEventListener('visibilitychange', () => { if (!document.hidden) refreshLive(false); });
     if ('serviceWorker' in navigator && (location.protocol === 'https:' || location.hostname === 'localhost')) navigator.serviceWorker.register('sw.js').catch(() => {});
+  } else {
+    setNotice('snapshot');
   }
 })();

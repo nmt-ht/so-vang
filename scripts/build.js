@@ -1,4 +1,4 @@
-// Ghép mã nguồn và dữ liệu thành: dist/so-vang.html (bản xem nhanh) và docs/ (bản cài lên iPhone, GitHub Pages phục vụ từ đây).
+// Ghép mã nguồn và dữ liệu thành: dist/so-vang.html (bản xem nhanh) và app tại thư mục gốc repo (GitHub Pages phục vụ từ đây).
 // Chạy: node scripts/build.js
 const fs = require('fs');
 const path = require('path');
@@ -6,7 +6,7 @@ const zlib = require('zlib');
 
 const root = path.join(__dirname, '..');
 const read = (p) => fs.readFileSync(path.join(root, p), 'utf8');
-const css = read('src/app.css');
+const css = read('src/tokens.css') + read('src/app.css');
 const body = read('src/body.html');
 const engine = read('src/engine.js');
 const app = read('src/app.js');
@@ -18,9 +18,8 @@ const scripts = (standalone) => `<script>window.__STANDALONE__=${standalone};win
 <script>${app}</script>`;
 
 const dist = path.join(root, 'dist');
-const site = path.join(root, 'docs');
+const site = root;
 fs.mkdirSync(dist, { recursive: true });
-fs.mkdirSync(site, { recursive: true });
 fs.writeFileSync(path.join(site, '.nojekyll'), ''); // phục vụ nguyên trạng, không qua Jekyll
 
 // Bản xem nhanh: nơi xuất bản tự bọc khung tài liệu. Phần đầu riêng của máy này (nếu có) nằm trong local/, không commit.
@@ -83,6 +82,10 @@ self.addEventListener('fetch', (e) => {
 });
 `);
 
+// Giữ địa chỉ cũ /docs/ hoạt động bằng cách chuyển sang địa chỉ mới.
+fs.mkdirSync(path.join(root, 'docs'), { recursive: true });
+fs.writeFileSync(path.join(root, 'docs', 'index.html'), '<!doctype html><meta charset="utf-8"><title>Sổ Vàng</title><meta http-equiv="refresh" content="0; url=../"><a href="../">Mở Sổ Vàng</a>');
+
 // Biểu tượng: thỏi vàng trên nền ngọc, vẽ trực tiếp ra PNG để không cần thư viện ngoài.
 function png(size) {
   const SS = 3;
@@ -132,5 +135,5 @@ fs.writeFileSync(path.join(site, 'icon-512.png'), png(512));
 
 const kb = (p) => (fs.statSync(p).size / 1024).toFixed(0) + ' KB';
 console.log('dist/so-vang.html', kb(path.join(dist, 'so-vang.html')));
-for (const f of fs.readdirSync(site)) console.log('docs/' + f, kb(path.join(site, f)));
+for (const f of ['index.html', 'manifest.webmanifest', 'sw.js', 'icon-180.png', 'icon-512.png']) console.log(f, kb(path.join(site, f)));
 console.log('cache version', version);
