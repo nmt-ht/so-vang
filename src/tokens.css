@@ -20,6 +20,8 @@
   --color-accent-ink: oklch(99.4% 0.009 93.6);
   --color-up-soft: oklch(93.3% 0.028 162.1);
   --color-down-soft: oklch(92.3% 0.028 25.9);
+  --color-up-ink: oklch(46.0% 0.090 170.1);
+  --color-down-ink: oklch(49.0% 0.150 33.4);
   --color-board: oklch(29.9% 0.046 172.3);
   --color-board-ink: oklch(95.3% 0.012 157.0);
   --color-board-muted: oklch(82.6% 0.032 163.1);
@@ -55,6 +57,8 @@
   --color-accent-ink: oklch(20.3% 0.027 87.0);
   --color-up-soft: oklch(31.1% 0.047 163.7);
   --color-down-soft: oklch(28.8% 0.052 26.2);
+  --color-up-ink: oklch(71.0% 0.115 175.9);
+  --color-down-ink: oklch(72.0% 0.135 31.9);
   --color-board: oklch(32.3% 0.051 171.0);
   --color-board-line: oklch(45.8% 0.063 169.8);
   color-scheme: dark;
@@ -76,6 +80,8 @@
   --color-accent-ink: oklch(20.3% 0.027 87.0);
   --color-up-soft: oklch(31.1% 0.047 163.7);
   --color-down-soft: oklch(28.8% 0.052 26.2);
+  --color-up-ink: oklch(71.0% 0.115 175.9);
+  --color-down-ink: oklch(72.0% 0.135 31.9);
   --color-board: oklch(32.3% 0.051 171.0);
   --color-board-line: oklch(45.8% 0.063 169.8);
   color-scheme: dark;

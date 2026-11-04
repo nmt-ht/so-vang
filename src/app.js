@@ -21,6 +21,7 @@
   const state = {
     tab: TABS.includes(location.hash.slice(1)) ? location.hash.slice(1) : 'tong-quan',
     market: saved.market === 'world' ? 'world' : 'vn',
+    chartUsed: !!saved.chartUsed,
     type: VN_TYPES[saved.type] ? saved.type : 'SJL1L10',
     range: { vn: 182, world: 365 },
     waveRange: { vn: 0, world: 1826 },
@@ -116,8 +117,17 @@
   function xLabel(t, spanDays) {
     const d = E.toDate(t);
     if (spanDays <= 120) return fmtShort(d);
-    if (spanDays <= 800) return `${d.slice(5, 7)}/${d.slice(2, 4)}`;
+    // Ghi rõ "T" để không lẫn với dạng ngày/tháng của khoảng ngắn.
+    if (spanDays <= 800) return `T${+d.slice(5, 7)}/${d.slice(2, 4)}`;
     return d.slice(0, 4);
+  }
+
+  // Gợi ý kéo biểu đồ chỉ hiện đến lần dùng đầu tiên.
+  function markChartUsed() {
+    if (state.chartUsed) return;
+    state.chartUsed = true;
+    persist();
+    document.querySelectorAll('.chart-hint').forEach((n) => n.remove());
   }
 
   // Chỉ một biểu đồ giữ con trỏ tại một thời điểm; chạm ra ngoài thì trở về giá trị mới nhất.
@@ -199,13 +209,20 @@
     const svg = wrap.firstChild;
     host.appendChild(svg);
     const cross = svg.querySelector('.cross');
+    if (!state.chartUsed && !document.querySelector('.chart-hint')) {
+      const hint = document.createElement('p');
+      hint.className = 'note chart-hint';
+      hint.textContent = 'Chạm hoặc kéo ngang trên biểu đồ để xem từng ngày.';
+      host.appendChild(hint);
+    }
 
     function write(i, atRest) {
       const info = o.tip(i);
       readout.innerHTML = `<div class="readout-title">${atRest ? prefix : ''}${esc(info.title)}</div><div class="readout-rows">${info.rows.map((r) => `<span>${r[2] ? `<i style="background:${r[2]}"></i>` : ''}${esc(r[0])}<b>${esc(r[1])}</b></span>`).join('')}</div>`;
     }
-    let cursor = -1, down = false;
+    let cursor = -1, down = false, scrubbing = false, startX = 0, startY = 0;
     function show(i) {
+      markChartUsed();
       cursor = Math.max(0, Math.min(axis.length - 1, i));
       const x = X(axis[cursor][0]);
       const info = o.tip(cursor);
@@ -222,14 +239,33 @@
       return lo;
     }
     reset();
+    // Với cảm ứng, chỉ đổi số đọc khi chạm hoặc kéo ngang: ngón tay đặt lên biểu đồ để cuộn trang thì không đổi.
     svg.addEventListener('pointerdown', (e) => {
-      if (activeReset && activeReset !== reset) activeReset();
-      activeReset = reset; down = true;
-      show(nearest(e.clientX));
+      if (activeReset && activeReset !== reset) { activeReset(); activeReset = null; }
+      down = true; startX = e.clientX; startY = e.clientY;
+      scrubbing = e.pointerType !== 'touch';
+      if (scrubbing) { activeReset = reset; show(nearest(e.clientX)); }
     });
-    svg.addEventListener('pointermove', (e) => { if (down || e.pointerType === 'mouse') { activeReset = reset; show(nearest(e.clientX)); } });
-    ['pointerup', 'pointercancel'].forEach((n) => svg.addEventListener(n, () => { down = false; }));
-    svg.addEventListener('pointerleave', (e) => { down = false; if (e.pointerType === 'mouse') reset(); });
+    svg.addEventListener('pointermove', (e) => {
+      if (!down && e.pointerType !== 'mouse') return;
+      if (down && !scrubbing) {
+        const dx = Math.abs(e.clientX - startX), dy = Math.abs(e.clientY - startY);
+        if (dx < 6 || dx < dy) return;
+        scrubbing = true;
+      }
+      activeReset = reset; show(nearest(e.clientX));
+    });
+    svg.addEventListener('pointerup', (e) => {
+      if (down && !scrubbing) { activeReset = reset; show(nearest(e.clientX)); }
+      down = false; scrubbing = false;
+    });
+    // Trình duyệt đã nhận thao tác để cuộn trang: trả số đọc về giá mới nhất.
+    svg.addEventListener('pointercancel', () => {
+      down = false; scrubbing = false;
+      if (activeReset === reset) activeReset = null;
+      reset();
+    });
+    svg.addEventListener('pointerleave', (e) => { if (e.pointerType === 'mouse') { down = false; scrubbing = false; reset(); } });
     svg.addEventListener('blur', () => { if (cursor >= 0 && !down) reset(); });
     svg.addEventListener('keydown', (e) => {
       if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') {
@@ -870,6 +906,7 @@
     const sel = $('vn-type');
     sel.hidden = state.market !== 'vn';
     sel.value = state.type;
+    $('world-label').hidden = state.market !== 'world';
     TABS.forEach((t) => { const b = $('tab-' + t); if (t === state.tab) b.setAttribute('aria-current', 'page'); else b.removeAttribute('aria-current'); });
     ({ 'tong-quan': renderOverview, ngay: renderDay, dot: renderWaves, 'du-bao': renderForecast })[state.tab]();
     updateStatus();
@@ -878,7 +915,7 @@
     if (again && again !== document.activeElement && again.tagName !== 'INPUT') again.focus({ preventScroll: true });
   }
 
-  function persist() { store.set(UI_KEY, { market: state.market, type: state.type }); }
+  function persist() { store.set(UI_KEY, { market: state.market, type: state.type, chartUsed: state.chartUsed }); }
 
   function switchTab(tab) {
     if (tab === state.tab) { window.scrollTo(0, 0); return; } // chạm lại tab đang mở thì về đầu trang, như app iOS

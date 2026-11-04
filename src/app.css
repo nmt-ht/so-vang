@@ -24,7 +24,7 @@ a { color: var(--color-accent); }
 .controls { position: sticky; top: env(safe-area-inset-top, 0px); z-index: 20; background: var(--color-paper); border-bottom: 1px solid var(--color-line); }
 .market-row { display: flex; gap: var(--space-sm); padding-block: var(--space-sm); }
 .seg { display: flex; flex: 1 1 56%; min-width: 0; background: var(--color-surface-2); border-radius: var(--radius-md); padding: 2px; }
-.seg button { flex: 1 1 0; min-width: 0; min-height: 40px; border: 0; background: none; border-radius: var(--radius-sm); font-weight: 500; font-size: var(--text-sm); color: var(--color-ink-2); white-space: nowrap; }
+.seg button { flex: 1 1 0; min-width: 0; min-height: var(--tap); border: 0; background: none; border-radius: var(--radius-sm); font-weight: 500; font-size: var(--text-sm); color: var(--color-ink-2); white-space: nowrap; }
 .seg button[aria-pressed="true"] { background: var(--color-surface); color: var(--color-ink); font-weight: 600; box-shadow: 0 1px 2px var(--color-shadow); }
 .type-select { flex: 1 1 44%; min-width: 0; min-height: var(--tap); border: 1px solid var(--color-line); background: var(--color-surface); border-radius: var(--radius-md); padding: 0 var(--space-sm); font-size: var(--text-md); font-weight: 500; }
 
@@ -99,7 +99,7 @@ main .wrap { display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--sp
 
 .up { color: var(--color-up); } .down { color: var(--color-down); } .flat { color: var(--color-muted); }
 .pill { display: inline-flex; align-items: center; gap: 3px; padding: 2px var(--space-sm); border-radius: var(--radius-sm); font-size: var(--text-xs); font-weight: 600; white-space: nowrap; }
-.pill.up { background: var(--color-up-soft); } .pill.down { background: var(--color-down-soft); } .pill.flat, .pill.gold { background: var(--color-surface-2); color: var(--color-ink-2); }
+.pill.up { background: var(--color-up-soft); color: var(--color-up-ink); } .pill.down { background: var(--color-down-soft); color: var(--color-down-ink); } .pill.flat, .pill.gold { background: var(--color-surface-2); color: var(--color-ink-2); }
 
 /* Mục mở rộng */
 details.block { display: block; padding-block: 0; }
@@ -124,7 +124,7 @@ td { text-align: right; padding: var(--space-sm) 0 var(--space-sm) var(--space-s
 th:first-child, td:first-child { text-align: left; padding-left: 0; }
 td:first-child { color: var(--color-ink-2); }
 tr.hl td { font-weight: 650; color: var(--color-ink); }
-.list-btn { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; gap: var(--space-md); align-items: center; width: 100%; min-height: var(--tap); padding: var(--space-xs) 0; border: 0; border-top: 1px solid var(--color-grid); background: none; text-align: left; font-size: var(--text-sm); }
+.list-btn { display: grid; grid-template-columns: minmax(0, 1fr) auto auto 8px; gap: var(--space-md); align-items: center; width: 100%; min-height: var(--tap); padding: var(--space-xs) 0; border: 0; border-top: 1px solid var(--color-grid); background: none; text-align: left; font-size: var(--text-sm); }
 .list-btn:first-child { border-top: 0; }
 .list-btn:active, .wave-btn:active { background: var(--color-surface-2); }
 .list-btn[aria-current="true"] .ld { color: var(--color-accent); font-weight: 650; }
@@ -137,7 +137,7 @@ tr.hl td { font-weight: 650; color: var(--color-ink); }
 .stat-pair .k { font-size: var(--text-xs); font-weight: 600; }
 .stat-pair .v { font: 700 var(--text-xl)/1.2 var(--font-display); }
 .stat-pair .s { font-size: var(--text-xs); color: var(--color-muted); }
-.wave-btn { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: 2px var(--space-md); align-items: center; width: 100%; min-height: 56px; padding: var(--space-sm) 0; border: 0; border-top: 1px solid var(--color-grid); background: none; text-align: left; }
+.wave-btn { display: grid; grid-template-columns: auto minmax(0, 1fr) auto 8px; gap: 2px var(--space-md); align-items: center; width: 100%; min-height: 56px; padding: var(--space-sm) 0; border: 0; border-top: 1px solid var(--color-grid); background: none; text-align: left; }
 .wave-btn:first-child { border-top: 0; }
 .wave-btn .wd { font-size: var(--text-sm); font-weight: 600; }
 .wave-btn .wm { grid-column: 2 / 4; font-size: var(--text-xs); color: var(--color-muted); }
@@ -198,6 +198,8 @@ tr.hl td { font-weight: 650; color: var(--color-ink); }
   .scn-row { grid-template-columns: minmax(0, 1fr) 6rem; }
   table { font-size: var(--text-xs); }
   .chip { padding: 0 var(--space-sm); }
+  .wave-btn { column-gap: var(--space-sm); }
+  .wave-btn .wd { font-size: var(--text-xs); white-space: nowrap; }
 }
 
 /* Một hàng cố định cho các nút chọn, chia đều chiều ngang ở mọi khổ màn hình */
@@ -208,3 +210,15 @@ tr.hl td { font-weight: 650; color: var(--color-ink); }
 .readout { min-height: 2.75rem; }
 #ch-main .readout, #ch-fc .readout { min-height: 4rem; }
 #sheet-title:focus { outline: none; }
+
+/* Ô bên phải luôn giữ chỗ để nút chọn thị trường không đổi kích thước */
+.market-label { flex: 1 1 48%; min-width: 0; display: flex; align-items: center; justify-content: center; font-size: var(--text-sm); font-weight: 500; color: var(--color-ink-2); white-space: nowrap; }
+.market-label[hidden] { display: none; }
+
+/* Dấu hiệu chạm được */
+.list-btn::after, .wave-btn::after { content: ""; justify-self: end; width: 7px; height: 7px; margin-right: 2px; border-top: 2px solid var(--color-muted); border-right: 2px solid var(--color-muted); transform: rotate(45deg); }
+.wave-btn::after { grid-column: 4; grid-row: 1 / span 2; }
+.chart-hint { margin-top: var(--space-xs); font-size: var(--text-xs); }
+
+/* Liên kết trong câu: nới vùng chạm mà không đổi khoảng cách dòng */
+.fine a, .notice a { padding-block: 13px; }
